@@ -1,0 +1,6 @@
+/dist/
+/.codex-chat-history/
+/.codex/
+*.jsonl
+*.user
+*.suo
