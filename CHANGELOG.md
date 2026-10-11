@@ -9,10 +9,12 @@
 - Existing tray level, persistent 48×48 muted indicator, optional card, themes and languages are preserved.
 - Recommended Windows 11 x64 installer in six languages, with a compact wizard logo at 100% scaling and a brighter Start menu icon. The first dialog offers current-user installation by default or all-users installation with elevation; the next page selects the folder.
 - Final launch and Start with Windows checkboxes are enabled by default. `/CURRENTUSER` and `/ALLUSERS` select the installer scope from the command line.
+- Startup shortcuts use the Unicode Windows Shell interface; Cyrillic paths and spaces are verified with an independent shortcut reader on Windows runners.
 - Startup uses a per-user or common Startup shortcut with `--autostart`. The tray can opt out the current user from common startup without elevation, while retaining the shortcut for other users; enabling startup clears that opt-out. Privileged commands manage the common shortcut directly.
 - The portable ZIP does not create startup automatically; an existing registration can remain active. Uninstall removes the installation's startup shortcut and preserves user settings and diagnostics.
 - Tray menus remain stable while microphone-level icons update, avoiding menu jitter.
 - Six-language headset diagnostics wizard: microphone selection, six button prompts five seconds apart, automatic stop after 30 seconds, manual stop and JSONL export to a chosen path. Microphone control is paused during capture.
+- Diagnostic window themes cover the title bar, microphone list and arrow, progress track, and readable disabled buttons as well as the background.
 - Local reports record exposed Windows media/consumer-telephony HID events, microphone state and bounded audio/Bluetooth/HID driver metadata, including a separate MagicAAP device match across other classes. No audio, signal-level history or ordinary keyboard input is recorded; reports are never uploaded automatically or included in release assets. Testing another headset does not enable microphone control for it.
 
 The verified hardware delivery path remains AirPods 4 with MagicAAP enabled. Operation without that driver and exclusive/ASIO capture paths are not verified; application-independent selection is not a claim that every application has been physically tested.

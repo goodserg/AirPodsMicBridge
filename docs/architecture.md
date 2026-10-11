@@ -6,6 +6,7 @@
 |---|---|
 | `src/BridgeApp.cs` | Single-instance lifecycle, preferences, startup controls, keyboard gesture queue, tray menus and UI polling |
 | `src/StartupRegistration.cs` | Per-user/common Startup shortcuts, current-user opt-out and installer commands |
+| `src/ShellShortcut.cs` | Unicode Windows Shell shortcut creation, independent of WScript's target-path setter |
 | `src/CoreAudioAdapter.cs` | Capture discovery, active audio sessions, target selection, mute application and cached peak meter |
 | `src/UiFeedback.cs` | Transparent tray glyphs, fixed corner OSD and optional card |
 | `src/Appearance.cs` | App/taskbar theme detection and themed menu renderer |

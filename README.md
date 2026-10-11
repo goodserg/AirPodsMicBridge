@@ -68,6 +68,8 @@ Stop a running copy:
 
 Open **Headset diagnostics** from the tray menu, or run `AirPodsMicBridge.exe --diagnostics`. Select the microphone you want to investigate; other headset brands can also be tested.
 
+The wizard follows the selected theme and language. The theme covers its title bar, microphone selector, progress track and buttons, including disabled states.
+
 1. Start a call or microphone test in another application, then click **Start**.
 2. Press the headset button once at each of the six prompts, five seconds apart. The test stops after 30 seconds; **Stop** ends it earlier.
 3. Click **Save report…** and choose a destination for the JSONL file.

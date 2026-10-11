@@ -17,7 +17,7 @@ namespace AirPodsMicBridge
         private readonly ComboBox microphones;
         private readonly Button refreshButton, startButton, stopButton, saveButton, closeButton;
         private readonly Label instructions, microphoneLabel, statusLabel, eventLabel;
-        private readonly ProgressBar progress;
+        private readonly DiagnosticProgress progress;
         private readonly Timer timer;
         private readonly Stopwatch sequence = new Stopwatch();
         private readonly Dictionary<IntPtr, DiagnosticRawInput> devices = new Dictionary<IntPtr, DiagnosticRawInput>();
@@ -53,14 +53,14 @@ namespace AirPodsMicBridge
             Controls.Add(layout);
             instructions = new Label { Dock = DockStyle.Fill, Text = T("diagnosticInstructions") };
             microphoneLabel = new Label { Dock = DockStyle.Fill, Text = T("diagnosticMicrophone") };
-            microphones = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            microphones = new DiagnosticComboBox { Dock = DockStyle.Fill };
             refreshButton = Button(T("diagnosticRefresh"));
             var select = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
             select.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             select.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             select.Controls.Add(microphones, 0, 0); select.Controls.Add(refreshButton, 1, 0);
             statusLabel = new Label { Dock = DockStyle.Fill, Text = T("diagnosticReady"), Padding = new Padding(0, 12, 0, 0) };
-            progress = new ProgressBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 30, Style = ProgressBarStyle.Continuous };
+            progress = new DiagnosticProgress { Dock = DockStyle.Fill, Minimum = 0, Maximum = 30, AccessibleName = T("diagnosticTitle") };
             eventLabel = new Label { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = Padding.Empty };
             startButton = Button(T("diagnosticStart")); stopButton = Button(T("diagnosticStop"));
@@ -85,7 +85,7 @@ namespace AirPodsMicBridge
 
         private static Button Button(string text)
         {
-            return new Button { Text = text, AutoSize = true, MinimumSize = new Size(86, 32), Padding = new Padding(8, 0, 8, 0), Margin = new Padding(0, 0, 8, 0) };
+            return new DiagnosticButton { Text = text, AutoSize = true, MinimumSize = new Size(86, 32), Padding = new Padding(8, 0, 8, 0), Margin = new Padding(0, 0, 8, 0) };
         }
         private static string T(string key)
         {
@@ -102,6 +102,9 @@ namespace AirPodsMicBridge
             microphoneLabel.Text = T("diagnosticMicrophone"); refreshButton.Text = T("diagnosticRefresh");
             startButton.Text = T("diagnosticStart"); stopButton.Text = T("diagnosticStop");
             saveButton.Text = T("diagnosticSave"); closeButton.Text = T("diagnosticClose");
+            progress.AccessibleName = T("diagnosticTitle");
+            ApplyWindowTheme();
+            Invalidate(true);
         }
         private static void ApplyColors(Control parent)
         {
@@ -110,8 +113,35 @@ namespace AirPodsMicBridge
                 control.BackColor = Appearance.BackgroundColor; control.ForeColor = Appearance.ForegroundColor;
                 Button button = control as Button;
                 if (button != null) { button.FlatStyle = FlatStyle.Flat; button.FlatAppearance.BorderColor = Appearance.BorderColor; }
+                DiagnosticComboBox combo = control as DiagnosticComboBox;
+                if (combo != null) combo.UpdateTheme();
+                control.Invalidate();
                 ApplyColors(control);
             }
+        }
+
+        protected override void OnHandleCreated(EventArgs args)
+        {
+            base.OnHandleCreated(args);
+            ApplyWindowTheme();
+        }
+
+        private void ApplyWindowTheme()
+        {
+            if (!IsHandleCreated) return;
+            try
+            {
+                int dark = Appearance.CurrentTheme == AppTheme.Dark ? 1 : 0;
+                int caption = ColorTranslator.ToWin32(Appearance.BackgroundColor);
+                int text = ColorTranslator.ToWin32(Appearance.ForegroundColor);
+                int border = ColorTranslator.ToWin32(Appearance.BorderColor);
+                // Windows 11 supports these documented DWM colors independently of the OS theme.
+                DwmSetWindowAttribute(Handle, 20, ref dark, 4);
+                DwmSetWindowAttribute(Handle, 35, ref caption, 4);
+                DwmSetWindowAttribute(Handle, 36, ref text, 4);
+                DwmSetWindowAttribute(Handle, 34, ref border, 4);
+            }
+            catch { }
         }
 
         private void RefreshMicrophones()
@@ -261,6 +291,7 @@ namespace AirPodsMicBridge
                 catch (Exception ex) { RecordError("raw-input-error", ex.GetType().Name + ":0x" + ex.HResult.ToString("X8")); }
             }
             base.WndProc(ref message);
+            if (message.Msg == 0x031A) ApplyWindowTheme();
         }
 
         private void RegisterRawInput()
@@ -424,5 +455,191 @@ namespace AirPodsMicBridge
         [DllImport("user32.dll", EntryPoint = "GetRawInputDeviceInfoW", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
         [DllImport("user32.dll", SetLastError = true)] private static extern uint GetRawInputDeviceList(IntPtr list, ref uint count, uint size);
+        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+    }
+
+    // Retain the native ComboBox's keyboard/navigation/accessibility behavior. Paint its
+    // selection surface and arrow as well as list items so native light chrome cannot leak.
+    internal sealed class DiagnosticComboBox : ComboBox
+    {
+        internal DiagnosticComboBox()
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList;
+            DrawMode = DrawMode.OwnerDrawFixed;
+            FlatStyle = FlatStyle.Flat;
+        }
+
+        protected override void OnHandleCreated(EventArgs args)
+        {
+            base.OnHandleCreated(args);
+            UpdateTheme();
+        }
+
+        protected override void OnFontChanged(EventArgs args)
+        {
+            base.OnFontChanged(args);
+            ItemHeight = Math.Max(20, Font.Height + 4);
+        }
+
+        internal void UpdateTheme()
+        {
+            BackColor = Appearance.BackgroundColor; ForeColor = Appearance.ForegroundColor;
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    bool dark = Appearance.CurrentTheme == AppTheme.Dark;
+                    SetWindowTheme(Handle, dark ? "DarkMode_CFD" : null, null);
+                    var info = new ComboBoxInfo { Size = Marshal.SizeOf(typeof(ComboBoxInfo)) };
+                    if (GetComboBoxInfo(Handle, ref info) && info.List != IntPtr.Zero)
+                        SetWindowTheme(info.List, dark ? "DarkMode_Explorer" : null, null);
+                }
+                catch { }
+            }
+            Invalidate();
+        }
+
+        protected override void OnDrawItem(DrawItemEventArgs args)
+        {
+            bool selected = (args.State & DrawItemState.Selected) != 0 && (args.State & DrawItemState.ComboBoxEdit) == 0;
+            Color background = selected ? Appearance.CardTint(null) : Appearance.BackgroundColor;
+            using (var brush = new SolidBrush(background)) args.Graphics.FillRectangle(brush, args.Bounds);
+            string text = args.Index >= 0 && args.Index < Items.Count ? GetItemText(Items[args.Index]) : GetItemText(SelectedItem);
+            var bounds = new Rectangle(args.Bounds.X + 6, args.Bounds.Y, Math.Max(1, args.Bounds.Width - 12), args.Bounds.Height);
+            TextRenderer.DrawText(args.Graphics, text, Font, bounds, Enabled ? Appearance.ForegroundColor : Appearance.SecondaryTextColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            if ((args.State & DrawItemState.Focus) != 0 && ShowFocusCues)
+                ControlPaint.DrawFocusRectangle(args.Graphics, Rectangle.Inflate(args.Bounds, -2, -2), Appearance.ForegroundColor, background);
+        }
+
+        protected override void OnSelectedIndexChanged(EventArgs args) { base.OnSelectedIndexChanged(args); Invalidate(); }
+        protected override void OnEnabledChanged(EventArgs args) { base.OnEnabledChanged(args); Invalidate(); }
+        protected override void OnGotFocus(EventArgs args) { base.OnGotFocus(args); Invalidate(); }
+        protected override void OnLostFocus(EventArgs args) { base.OnLostFocus(args); Invalidate(); }
+        protected override void OnDropDown(EventArgs args) { base.OnDropDown(args); Invalidate(); }
+        protected override void OnDropDownClosed(EventArgs args) { base.OnDropDownClosed(args); Invalidate(); }
+
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            if (message.Msg == 0x000F && IsHandleCreated)
+            {
+                using (Graphics graphics = Graphics.FromHwnd(Handle)) PaintSurface(graphics);
+            }
+            else if ((message.Msg == 0x0317 || message.Msg == 0x0318) && message.WParam != IntPtr.Zero)
+            {
+                using (Graphics graphics = Graphics.FromHdc(message.WParam)) PaintSurface(graphics);
+            }
+        }
+
+        private void PaintSurface(Graphics graphics)
+        {
+            Rectangle bounds = ClientRectangle;
+            if (bounds.Width < 2 || bounds.Height < 2) return;
+            using (var brush = new SolidBrush(Appearance.BackgroundColor)) graphics.FillRectangle(brush, bounds);
+            int arrowWidth = Math.Min(bounds.Width, Math.Max(24, bounds.Height));
+            var arrow = new Rectangle(bounds.Right - arrowWidth, 1, arrowWidth - 1, bounds.Height - 2);
+            using (var brush = new SolidBrush(Appearance.CardTint(null))) graphics.FillRectangle(brush, arrow);
+            Color foreground = Enabled ? Appearance.ForegroundColor : Appearance.SecondaryTextColor;
+            string text = GetItemText(SelectedItem);
+            var textBounds = new Rectangle(6, 0, Math.Max(1, bounds.Width - arrowWidth - 12), bounds.Height);
+            TextRenderer.DrawText(graphics, text, Font, textBounds, foreground,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            int centerX = arrow.Left + arrow.Width / 2, centerY = arrow.Top + arrow.Height / 2;
+            using (var pen = new Pen(foreground, 1.5f))
+                graphics.DrawLines(pen, new[] { new Point(centerX - 4, centerY - 2), new Point(centerX, centerY + 2), new Point(centerX + 4, centerY - 2) });
+            using (var pen = new Pen(Appearance.BorderColor)) graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+            if (Focused && ShowFocusCues)
+                ControlPaint.DrawFocusRectangle(graphics, new Rectangle(3, 3, Math.Max(1, bounds.Width - arrowWidth - 6), Math.Max(1, bounds.Height - 6)), foreground, Appearance.BackgroundColor);
+        }
+
+        [StructLayout(LayoutKind.Sequential)] private struct NativeRectangle { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] private struct ComboBoxInfo {
+            public int Size; public NativeRectangle ItemBounds, ButtonBounds; public uint ButtonState;
+            public IntPtr Combo, Item, List;
+        }
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] private static extern int SetWindowTheme(IntPtr window, string subApp, string subId);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetComboBoxInfo(IntPtr window, ref ComboBoxInfo info);
+    }
+
+    internal sealed class DiagnosticButton : Button
+    {
+        private bool hovered, pressed;
+        internal DiagnosticButton()
+        {
+            FlatStyle = FlatStyle.Flat; UseVisualStyleBackColor = false;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        }
+        protected override void OnMouseEnter(EventArgs args) { hovered = true; base.OnMouseEnter(args); Invalidate(); }
+        protected override void OnMouseLeave(EventArgs args) { hovered = false; base.OnMouseLeave(args); Invalidate(); }
+        protected override void OnMouseDown(MouseEventArgs args) { if (args.Button == MouseButtons.Left) pressed = true; base.OnMouseDown(args); Invalidate(); }
+        protected override void OnMouseUp(MouseEventArgs args) { pressed = false; base.OnMouseUp(args); Invalidate(); }
+        protected override void OnKeyDown(KeyEventArgs args) { if (args.KeyCode == Keys.Space) pressed = true; base.OnKeyDown(args); Invalidate(); }
+        protected override void OnKeyUp(KeyEventArgs args) { if (args.KeyCode == Keys.Space) pressed = false; base.OnKeyUp(args); Invalidate(); }
+        protected override void OnGotFocus(EventArgs args) { base.OnGotFocus(args); Invalidate(); }
+        protected override void OnLostFocus(EventArgs args) { pressed = false; base.OnLostFocus(args); Invalidate(); }
+        protected override void OnEnabledChanged(EventArgs args) { if (!Enabled) pressed = false; base.OnEnabledChanged(args); Invalidate(); }
+        protected override void OnPaint(PaintEventArgs args)
+        {
+            Rectangle bounds = ClientRectangle;
+            if (bounds.Width < 2 || bounds.Height < 2) return;
+            Color background = Enabled && (hovered || pressed) ? Appearance.CardTint(null) : Appearance.BackgroundColor;
+            Color foreground = Enabled ? Appearance.ForegroundColor : Appearance.SecondaryTextColor;
+            using (var brush = new SolidBrush(background)) args.Graphics.FillRectangle(brush, bounds);
+            using (var pen = new Pen(Focused && Enabled ? Color.FromArgb(139, 109, 239) : Appearance.BorderColor))
+                args.Graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+            var textBounds = new Rectangle(Padding.Left + 3, Padding.Top + 1,
+                Math.Max(1, bounds.Width - Padding.Horizontal - 6), Math.Max(1, bounds.Height - Padding.Vertical - 2));
+            TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
+            if (!ShowKeyboardCues) flags |= TextFormatFlags.HidePrefix;
+            TextRenderer.DrawText(args.Graphics, Text, Font, textBounds, foreground, flags);
+            if (Focused && Enabled && ShowFocusCues)
+                ControlPaint.DrawFocusRectangle(args.Graphics, Rectangle.Inflate(bounds, -4, -4), foreground, background);
+        }
+    }
+
+    internal sealed class DiagnosticProgress : Control
+    {
+        private int minimum, maximum = 30, value;
+        public int Minimum { get { return minimum; } set { minimum = value; if (maximum < minimum) maximum = minimum; Value = this.value; Invalidate(); } }
+        public int Maximum { get { return maximum; } set { maximum = value; if (minimum > maximum) minimum = maximum; Value = this.value; Invalidate(); } }
+        public int Value
+        {
+            get { return value; }
+            set
+            {
+                int next = Math.Max(minimum, Math.Min(maximum, value));
+                bool changed = this.value != next;
+                this.value = next;
+                Text = next.ToString(System.Globalization.CultureInfo.InvariantCulture) + " / " + maximum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (changed && IsHandleCreated) AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
+                Invalidate();
+            }
+        }
+        internal DiagnosticProgress()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            AccessibleRole = AccessibleRole.ProgressBar; TabStop = false; Value = 0;
+        }
+        protected override AccessibleObject CreateAccessibilityInstance() { return new ProgressAccessibleObject(this); }
+        private sealed class ProgressAccessibleObject : ControlAccessibleObject
+        {
+            private readonly DiagnosticProgress progress;
+            internal ProgressAccessibleObject(DiagnosticProgress progress) : base(progress) { this.progress = progress; }
+            public override string Value { get { return progress.Text; } set { } }
+            public override AccessibleStates State { get { return base.State | AccessibleStates.ReadOnly; } }
+        }
+        protected override void OnPaint(PaintEventArgs args)
+        {
+            Rectangle bounds = ClientRectangle;
+            if (bounds.Width < 2 || bounds.Height < 2) return;
+            using (var brush = new SolidBrush(Appearance.CardTint(null))) args.Graphics.FillRectangle(brush, bounds);
+            Rectangle inner = Rectangle.Inflate(bounds, -2, -2);
+            long range = (long)maximum - minimum;
+            int width = range <= 0 ? 0 : (int)(inner.Width * ((long)value - minimum) / range);
+            if (width > 0 && inner.Height > 0)
+                using (var brush = new SolidBrush(Color.FromArgb(139, 109, 239))) args.Graphics.FillRectangle(brush, inner.X, inner.Y, width, inner.Height);
+            using (var pen = new Pen(Appearance.BorderColor)) args.Graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+        }
     }
 }

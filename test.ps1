@@ -31,7 +31,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Startup check compilation failed' }
     & $startupExe
     if ($LASTEXITCODE -ne 0) { throw 'Startup checks failed' }
-    foreach ($checkName in @('DiagnosticChecks', 'RawInputChecks')) {
+    foreach ($checkName in @('DiagnosticChecks', 'RawInputChecks', 'DiagnosticAppearanceChecks')) {
         $checkExe = Join-Path $BuildRoot ($checkName + '.exe')
         & $compiler /nologo /langversion:5 /target:exe "/main:$checkName" /platform:x64 /codepage:65001 "/out:$checkExe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @sources (Join-Path $PSScriptRoot ('tests\' + $checkName + '.cs'))
         if ($LASTEXITCODE -ne 0) { throw "$checkName compilation failed" }
