@@ -191,10 +191,20 @@ internal static class StartupChecks
         {
             shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
             shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
-            Set(shortcut, "TargetPath", executable);
-            Set(shortcut, "Arguments", arguments);
-            Set(shortcut, "WorkingDirectory", workingDirectory);
+            Set(shortcut, "TargetPath", executable, path);
+            Set(shortcut, "Arguments", arguments, path);
+            Set(shortcut, "WorkingDirectory", workingDirectory, path);
             shortcut.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Fixture shortcut creation failed: shortcut=" + path +
+                "; shortcutLength=" + path.Length + "; target=" + executable + "; targetLength=" + executable.Length +
+                "; targetExists=" + File.Exists(executable) + "; workingDirectory=" + workingDirectory +
+                "; workingDirectoryLength=" + workingDirectory.Length + "; directoryExists=" + Directory.Exists(workingDirectory) +
+                "; culture=" + System.Globalization.CultureInfo.CurrentCulture.Name +
+                "; uiCulture=" + System.Globalization.CultureInfo.CurrentUICulture.Name +
+                "; process64=" + Environment.Is64BitProcess + "; OS=" + Environment.OSVersion.VersionString, ex);
         }
         finally { Release(shortcut); Release(shell); }
     }
@@ -204,9 +214,16 @@ internal static class StartupChecks
         return Convert.ToString(value.GetType().InvokeMember(name, BindingFlags.GetProperty, null, value, null));
     }
 
-    private static void Set(object value, string name, string text)
+    private static void Set(object value, string name, string text, string shortcutPath)
     {
-        value.GetType().InvokeMember(name, BindingFlags.SetProperty, null, value, new object[] { text });
+        try { value.GetType().InvokeMember(name, BindingFlags.SetProperty, null, value, new object[] { text }); }
+        catch (Exception ex)
+        {
+            Exception cause = ex.GetBaseException();
+            throw new InvalidOperationException("Fixture shortcut field=" + name + "; value=" + text +
+                "; valueLength=" + (text == null ? 0 : text.Length) + "; shortcut=" + shortcutPath +
+                "; deepestType=" + cause.GetType().FullName + "; deepestHResult=0x" + cause.HResult.ToString("X8"), ex);
+        }
     }
 
     private static void Release(object value)
