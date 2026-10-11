@@ -4,8 +4,8 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
-using MagicPodsR7Bridge;
-using Appearance = MagicPodsR7Bridge.Appearance;
+using AirPodsMicBridge;
+using Appearance = AirPodsMicBridge.Appearance;
 
 internal static class PresentationChecks
 {
@@ -136,6 +136,8 @@ internal static class PresentationChecks
         theme.DropDownItems.Add(new ToolStripMenuItem(Localization.Get("dark")) { Enabled = false });
         menu.Items.Add(theme);
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("showCard")) { Checked = true });
+        menu.Items.Add(new ToolStripMenuItem(Localization.Get("startWithWindows")) { Checked = true });
+        menu.Items.Add(new ToolStripMenuItem(Localization.Get("diagnosticTitle")));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("language")));
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("exit")));

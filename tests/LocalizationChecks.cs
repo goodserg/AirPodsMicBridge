@@ -2,17 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
-using MagicPodsR7Bridge;
+using AirPodsMicBridge;
 
 internal static class LocalizationChecks
 {
     private static int assertions;
     private static readonly string[] Keys =
     {
-        "cardTitle", "microphoneMuted", "microphoneLive", "waitingR7",
+        "cardTitle", "microphoneMuted", "microphoneLive", "waitingMicrophone",
         "controlEnabled", "showCard", "exit", "tooltipMuted", "tooltipPaused",
-        "tooltipWaiting", "tooltipLive", "waitingR7Suffix", "toggleFailed",
-        "startupError", "language", "theme", "automatic", "light", "dark"
+        "tooltipWaiting", "tooltipLive", "waitingMicrophoneSuffix", "toggleFailed",
+        "startupError", "language", "theme", "automatic", "light", "dark",
+        "startWithWindows", "startupSettingFailed",
+        "diagnosticTitle", "diagnosticMicrophone", "diagnosticRefresh", "diagnosticInstructions",
+        "diagnosticStart", "diagnosticStop", "diagnosticSave", "diagnosticClose", "diagnosticReady",
+        "diagnosticPress", "diagnosticFinished", "diagnosticEvents", "diagnosticNoMicrophones",
+        "diagnosticError", "diagnosticSaved", "diagnosticSaveFailed", "diagnosticReportFilter",
+        "diagnosticRawInputUnavailable"
     };
 
     private static int Main()
@@ -89,6 +95,9 @@ internal static class LocalizationChecks
                 string text = Localization.Get(key);
                 Check(!String.IsNullOrWhiteSpace(text), "Empty text: " + options[index].Code + "/" + key);
                 Check(text != key, "Unresolved key: " + options[index].Code + "/" + key);
+                Check(text.IndexOf("R7", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    text.IndexOf("Р7", StringComparison.OrdinalIgnoreCase) < 0,
+                    "Application-specific text: " + options[index].Code + "/" + key);
                 if (key == "startupError")
                 {
                     string formatted = Localization.Get(key, "TEST_ERROR");

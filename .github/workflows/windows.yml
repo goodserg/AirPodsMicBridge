@@ -13,12 +13,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Prepare temporary build directory
+        shell: pwsh
+        run: |
+          $temporaryRoot = Join-Path $env:RUNNER_TEMP 'AirPodsMicBridge-ci'
+          New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+          "TEMP=$temporaryRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$temporaryRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build
         shell: pwsh
         run: ./build.ps1
-      - name: Check localization and presentation
+      - name: Check capture policy, localization, presentation, startup and diagnostics
         shell: pwsh
         run: ./test.ps1
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $toolRoot = Join-Path $env:TEMP 'InnoSetup-6.7.3'
+          New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
+          $download = Join-Path $toolRoot 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $download
+          if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne '9C73C3BAE7ED48D44112A0F48E66742C00090BDB5BEF71D9D3C056C66E97B732') { throw 'Inno Setup checksum mismatch' }
+          $compilerDirectory = Join-Path $toolRoot 'compiler'
+          $process = Start-Process -FilePath $download -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/CURRENTUSER',('/DIR="'+$compilerDirectory+'"'),'/NOICONS','/TASKS=') -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
+          $compiler = Join-Path $compilerDirectory 'ISCC.exe'
+          ./build-installer.ps1 -CompilerPath $compiler
+      - name: Check installer lifecycle in six languages
+        shell: pwsh
+        run: ./test-installer.ps1 -CompilerPath (Join-Path $env:TEMP 'InnoSetup-6.7.3\compiler\ISCC.exe')
       - name: Package
         shell: pwsh
         run: ./package.ps1
@@ -27,5 +50,6 @@ jobs:
           name: AirPodsMicBridge-windows-x64
           path: |
             dist/AirPodsMicBridge-*.zip
+            dist/AirPodsMicBridge-*-Setup.exe
             dist/AirPodsMicBridge-*-SHA256SUMS.txt
           if-no-files-found: error

@@ -15,8 +15,95 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
-using MagicPodsR7Bridge;
+using AirPodsMicBridge;
 static class IconMaker {
+    static GraphicsPath Rounded(RectangleF bounds, float radius) {
+        float diameter = radius * 2;
+        var path = new GraphicsPath();
+        path.AddArc(bounds.Left,bounds.Top,diameter,diameter,180,90);
+        path.AddArc(bounds.Right-diameter,bounds.Top,diameter,diameter,270,90);
+        path.AddArc(bounds.Right-diameter,bounds.Bottom-diameter,diameter,diameter,0,90);
+        path.AddArc(bounds.Left,bounds.Bottom-diameter,diameter,diameter,90,90);
+        path.CloseFigure();
+        return path;
+    }
+    // App/installer identity is deliberately independent of live microphone state and tray theme.
+    static Bitmap BrandMark(int edge) {
+        int sampledEdge = edge * 4;
+        using (var sampled = new Bitmap(sampledEdge,sampledEdge,PixelFormat.Format32bppArgb)) {
+            using (Graphics graphics = Graphics.FromImage(sampled)) {
+                graphics.Clear(Color.Transparent);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.ScaleTransform(sampledEdge/256f,sampledEdge/256f);
+                using (GraphicsPath plate = Rounded(new RectangleF(12,12,232,232),54))
+                using (var color = new LinearGradientBrush(new RectangleF(0,0,256,256),Color.FromArgb(139,109,239),Color.FromArgb(103,70,198),90f))
+                    graphics.FillPath(color,plate);
+                using (GraphicsPath capsule = Rounded(new RectangleF(98,48,60,112),30))
+                    graphics.FillPath(Brushes.White,capsule);
+                using (var line = new Pen(Color.White,18))
+                using (var cradle = new GraphicsPath()) {
+                    line.StartCap = LineCap.Round;
+                    line.EndCap = LineCap.Round;
+                    line.LineJoin = LineJoin.Round;
+                    cradle.AddLine(82,118,82,143);
+                    cradle.AddBezier(82,143,82,170,101,188,128,188);
+                    cradle.AddBezier(128,188,155,188,174,170,174,143);
+                    cradle.AddLine(174,143,174,118);
+                    graphics.DrawPath(line,cradle);
+                    graphics.DrawLine(line,128,188,128,211);
+                    graphics.DrawLine(line,108,213,148,213);
+                }
+            }
+            var result = new Bitmap(edge,edge,PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(result)) {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.CompositingQuality = CompositingQuality.HighQuality;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.DrawImage(sampled,new Rectangle(0,0,edge,edge),0,0,sampledEdge,sampledEdge,GraphicsUnit.Pixel);
+            }
+            return result;
+        }
+    }
+    static void WriteAppIcon(string path) {
+        int[] edges = {16,20,24,32,48,64,128,256};
+        byte[][] frames = new byte[edges.Length][];
+        for (int index=0;index<edges.Length;index++)
+            using (Bitmap bitmap = BrandMark(edges[index]))
+            using (var encoded = new MemoryStream()) {
+                bitmap.Save(encoded,ImageFormat.Png);
+                frames[index] = encoded.ToArray();
+            }
+        using (var writer = new BinaryWriter(File.Create(path))) {
+            writer.Write((ushort)0); writer.Write((ushort)1); writer.Write((ushort)edges.Length);
+            uint offset = (uint)(6+16*edges.Length);
+            for (int index=0;index<edges.Length;index++) {
+                writer.Write((byte)(edges[index]==256 ? 0 : edges[index]));
+                writer.Write((byte)(edges[index]==256 ? 0 : edges[index]));
+                writer.Write((byte)0); writer.Write((byte)0);
+                writer.Write((ushort)1); writer.Write((ushort)32);
+                writer.Write((uint)frames[index].Length); writer.Write(offset);
+                offset += (uint)frames[index].Length;
+            }
+            foreach (byte[] frame in frames) writer.Write(frame);
+        }
+    }
+    static void WriteInstallerBrand(string logoPath, string sidebarPath) {
+        using (Bitmap logo = BrandMark(128)) logo.Save(logoPath,ImageFormat.Png);
+        using (var sidebar = new Bitmap(328,628,PixelFormat.Format32bppArgb))
+        using (Graphics graphics = Graphics.FromImage(sidebar))
+        using (Bitmap logo = BrandMark(164))
+        using (Font brand = new Font("Segoe UI",28,FontStyle.Bold,GraphicsUnit.Pixel))
+        using (var color = new SolidBrush(Color.FromArgb(101,111,129)))
+        using (var centered = new StringFormat { Alignment=StringAlignment.Center }) {
+            graphics.Clear(Color.FromArgb(244,246,250));
+            graphics.DrawImageUnscaled(logo,82,76);
+            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            graphics.DrawString("AirPods",brand,color,new RectangleF(24,478,280,40),centered);
+            graphics.DrawString("Mic Bridge",brand,color,new RectangleF(24,514,280,40),centered);
+            sidebar.Save(sidebarPath,ImageFormat.Png);
+        }
+    }
     static void DrawTray(Graphics graphics, Icon icon, int x, int y, int edge) {
         using (Bitmap bitmap = icon.ToBitmap()) {
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
@@ -27,8 +114,8 @@ static class IconMaker {
         Localization.SetLanguage("en");
         Appearance.SetTheme(AppTheme.Light);
         Appearance.SetTrayTheme(AppTheme.Dark);
-        using (Icon icon = UiFeedback.CreateTrayIcon(Color.FromArgb(38,58,79)))
-        using (FileStream stream = File.Create(args[0])) icon.Save(stream);
+        WriteAppIcon(args[0]);
+        WriteInstallerBrand(args[5],args[6]);
         using (Bitmap image = UiFeedback.CreateCardPreview(true)) image.Save(args[1], ImageFormat.Png);
         using (Bitmap image = UiFeedback.CreateOsdPreview(true)) image.Save(args[2], ImageFormat.Png);
         using (Bitmap preview = new Bitmap(740, 220))
@@ -77,14 +164,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon generation compilation failed' }
 $assetRoot = Join-Path $PSScriptRoot 'assets'
 New-Item -ItemType Directory -Path $assetRoot -Force | Out-Null
 $iconFile = Join-Path $assetRoot 'airpods-mic.ico'
-& $assetExe $iconFile (Join-Path $assetRoot 'notification-preview.png') (Join-Path $assetRoot 'indicator-preview.png') (Join-Path $assetRoot 'tray-level-preview.png') (Join-Path $assetRoot 'ui-preview.png')
+& $assetExe $iconFile (Join-Path $assetRoot 'notification-preview.png') (Join-Path $assetRoot 'indicator-preview.png') (Join-Path $assetRoot 'tray-level-preview.png') (Join-Path $assetRoot 'ui-preview.png') (Join-Path $assetRoot 'installer-logo.png') (Join-Path $assetRoot 'installer-sidebar.png')
 if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed' }
-& $compiler /nologo /langversion:5 /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$builtFile" "/win32icon:$iconFile" "/win32manifest:$(Join-Path $PSScriptRoot 'src\app.manifest')" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll (Join-Path $PSScriptRoot 'src\BridgeApp.cs') (Join-Path $PSScriptRoot 'src\CoreAudioAdapter.cs') @uiSources
+$appSources = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' -File | ForEach-Object { $_.FullName }
+& $compiler /nologo /langversion:5 /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$builtFile" "/win32icon:$iconFile" "/win32manifest:$(Join-Path $PSScriptRoot 'src\app.manifest')" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @appSources
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Copy-Item -LiteralPath $builtFile -Destination (Join-Path $OutputDirectory 'AirPodsMicBridge.exe') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md'),(Join-Path $PSScriptRoot 'README.ru.md'),(Join-Path $PSScriptRoot 'CHANGELOG.md') -Destination $OutputDirectory -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\releases\v1.2.0.md') -Destination (Join-Path $OutputDirectory 'RELEASE_NOTES.md') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\releases\v1.3.0.md') -Destination (Join-Path $OutputDirectory 'RELEASE_NOTES.md') -Force
 $outputAssets = Join-Path $OutputDirectory 'assets'
 New-Item -ItemType Directory -Path $outputAssets -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $assetRoot 'theme-preview.png') -Destination $outputAssets -Force

@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace MagicPodsR7Bridge
+namespace AirPodsMicBridge
 {
     public enum AppTheme { Light, Dark }
 

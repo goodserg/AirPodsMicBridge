@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace MagicPodsR7Bridge
+namespace AirPodsMicBridge
 {
     public sealed class CaptureEndpointSnapshot
     {
@@ -13,8 +13,8 @@ namespace MagicPodsR7Bridge
         public bool IsAirPods { get; set; }
         public bool DefaultCommunications { get; set; }
         public bool? Muted { get; set; }
-        public bool HasActiveR7Capture { get; set; }
-        public int[] ActiveR7ProcessIds { get; set; }
+        public int ActiveSessionCount { get; set; }
+        public bool HasActiveCapture { get { return ActiveSessionCount > 0; } }
         public string Error { get; set; }
     }
     public sealed class AudioStateSnapshot
@@ -26,9 +26,11 @@ namespace MagicPodsR7Bridge
         public string EndpointName { get { return Target == null ? null : Target.FriendlyName; } }
         public bool EndpointActive { get { return Target != null; } }
         public bool? EndpointMuted { get { return Target == null ? null : Target.Muted; } }
-        public bool HasActiveR7Capture { get { return Target != null && Target.HasActiveR7Capture; } }
-        // Eligibility reflects active R7 microphone use, not proof of a connected call; the caller gates handling.
-        public bool CanArm { get { return Target != null && Target.IsAirPods && Target.HasActiveR7Capture && String.IsNullOrEmpty(Error) && String.IsNullOrEmpty(Target.Error); } }
+        public bool HasActiveCapture { get { return Target != null && Target.HasActiveCapture; } }
+        // Any running capture session qualifies, including browser and system sessions.
+        public bool CanArm { get { return Target != null && Target.IsAirPods && Target.HasActiveCapture &&
+            Target.Muted.HasValue && !String.IsNullOrEmpty(Target.EndpointId) &&
+            String.IsNullOrEmpty(Error) && String.IsNullOrEmpty(Target.Error); } }
     }
 
     // Reads Windows' existing capture peak meter; never opens or records an audio stream.
@@ -190,38 +192,41 @@ namespace MagicPodsR7Bridge
                     finally { Release(device); }
                 }
                 rows.Sort((left, right) => StringComparer.Ordinal.Compare(left.EndpointId, right.EndpointId));
-                CaptureEndpointSnapshot target = null;
-                int eligibleCount = 0;
-                bool anyAirPods = false;
-                foreach (var row in rows)
-                {
-                    anyAirPods |= row.IsAirPods;
-                    if (!String.IsNullOrEmpty(pinned))
-                    {
-                        if (String.Equals(row.EndpointId, pinned, StringComparison.Ordinal)) target = row;
-                    }
-                    else if (row.IsAirPods && row.HasActiveR7Capture && String.IsNullOrEmpty(row.Error))
-                    {
-                        eligibleCount++;
-                        target = row;
-                    }
-                }
-                string selectionError = null;
-                if (String.IsNullOrEmpty(pinned) && eligibleCount != 1)
-                {
-                    target = null;
-                    selectionError = eligibleCount > 1 ? "AmbiguousR7AirPodsCaptureEndpoints" :
-                        anyAirPods ? "NoActiveR7AirPodsCapture" : "NoActiveAirPodsCaptureEndpoint";
-                }
-                else if (target == null) selectionError = "PinnedCaptureEndpointUnavailable";
-                return new AudioStateSnapshot { Target = target, CaptureEndpoints = rows.ToArray(), Error = selectionError };
+                return SelectTarget(rows.ToArray(), pinned);
             }
             finally { Release(devices); Release(enumerator); }
+        }
+        // Shared by ordinary discovery and gesture revalidation. Never guess another microphone.
+        internal static AudioStateSnapshot SelectTarget(CaptureEndpointSnapshot[] endpoints, string pinnedEndpointId = null)
+        {
+            var rows = endpoints == null ? new CaptureEndpointSnapshot[0] : (CaptureEndpointSnapshot[])endpoints.Clone();
+            CaptureEndpointSnapshot target = null;
+            bool anyAirPods = false, unknownAirPods = false;
+            int eligibleCount = 0;
+            foreach (var row in rows)
+            {
+                if (row == null || !row.IsAirPods) continue;
+                anyAirPods = true;
+                if (!String.IsNullOrEmpty(row.Error) || !row.Muted.HasValue || String.IsNullOrEmpty(row.EndpointId))
+                {
+                    unknownAirPods = true;
+                    continue;
+                }
+                if (row.HasActiveCapture) { eligibleCount++; target = row; }
+            }
+            string error = unknownAirPods ? "AirPodsCaptureStateUnavailable" :
+                eligibleCount > 1 ? "AmbiguousAirPodsCaptureEndpoints" :
+                eligibleCount == 0 ? (anyAirPods ? "NoActiveAirPodsCapture" : "NoAirPodsCaptureEndpoint") : null;
+            if (error == null && !String.IsNullOrEmpty(pinnedEndpointId) &&
+                !String.Equals(target.EndpointId, pinnedEndpointId, StringComparison.Ordinal))
+                error = "PinnedCaptureEndpointNotInUse";
+            if (error != null) target = null;
+            return new AudioStateSnapshot { Target = target, CaptureEndpoints = rows, Error = error };
         }
         private static CaptureEndpointSnapshot ReadDevice(IMMDevice device, string defaultId)
         {
             string id; Check(device.GetId(out id));
-            var row = new CaptureEndpointSnapshot { EndpointId = id, ActiveR7ProcessIds = new int[0], DefaultCommunications = id == defaultId };
+            var row = new CaptureEndpointSnapshot { EndpointId = id, DefaultCommunications = id == defaultId };
             try
             {
                 row.FriendlyName = FriendlyName(device);
@@ -242,26 +247,19 @@ namespace MagicPodsR7Bridge
                 Guid iid = SessionManager2Iid; Check(device.Activate(ref iid, ClsctxAll, IntPtr.Zero, out managerObject));
                 Check(((IAudioSessionManager2)managerObject).GetSessionEnumerator(out sessions));
                 int count; Check(sessions.GetCount(out count));
-                var r7Ids = new List<int>();
                 for (int i = 0; i < count; i++)
                 {
                     IAudioSessionControl control = null;
                     try
                     {
                         Check(sessions.GetSession(i, out control));
-                        int state; Check(control.GetState(out state)); if (state != 1) continue;
-                        uint pid; Check(((IAudioSessionControl2)control).GetProcessId(out pid));
-                        try
-                        {
-                            using (var process = Process.GetProcessById(checked((int)pid)))
-                                if (String.Equals(process.ProcessName, "r7-team", StringComparison.OrdinalIgnoreCase)) r7Ids.Add(process.Id);
-                        }
-                        catch (ArgumentException) { }
-                        catch (InvalidOperationException) { }
+                        int state; Check(control.GetState(out state));
+                        if (state < 0 || state > 2) throw new InvalidOperationException("UnknownCaptureSessionState");
+                        // Session activity is independent of process identity, permissions and app-specific mute UI.
+                        if (state == 1) row.ActiveSessionCount++;
                     }
                     finally { Release(control); }
                 }
-                r7Ids.Sort(); row.ActiveR7ProcessIds = r7Ids.ToArray(); row.HasActiveR7Capture = r7Ids.Count > 0;
             }
             catch (Exception ex) { row.Error = ErrorCode(ex); }
             finally { Release(sessions); Release(managerObject); }
@@ -377,20 +375,6 @@ namespace MagicPodsR7Bridge
         }
         [ComImport, Guid("F4B1A599-7266-4319-A8CA-E70ACB11E8CD"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] private interface IAudioSessionControl {
             [PreserveSig] int GetState(out int state);
-        }
-        [ComImport, Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] private interface IAudioSessionControl2 {
-            [PreserveSig] int GetState(out int state);
-            [PreserveSig] int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] out string name);
-            [PreserveSig] int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, ref Guid context);
-            [PreserveSig] int GetIconPath([MarshalAs(UnmanagedType.LPWStr)] out string path);
-            [PreserveSig] int SetIconPath([MarshalAs(UnmanagedType.LPWStr)] string path, ref Guid context);
-            [PreserveSig] int GetGroupingParam(out Guid grouping);
-            [PreserveSig] int SetGroupingParam(ref Guid grouping, ref Guid context);
-            [PreserveSig] int RegisterAudioSessionNotification(IntPtr callback);
-            [PreserveSig] int UnregisterAudioSessionNotification(IntPtr callback);
-            [PreserveSig] int GetSessionIdentifier([MarshalAs(UnmanagedType.LPWStr)] out string id);
-            [PreserveSig] int GetSessionInstanceIdentifier([MarshalAs(UnmanagedType.LPWStr)] out string id);
-            [PreserveSig] int GetProcessId(out uint processId);
         }
     }
 }

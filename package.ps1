@@ -1,4 +1,4 @@
-param([string]$Version = '1.2.0', [string]$OutputRoot = '')
+param([string]$Version = '1.3.0', [string]$OutputRoot = '')
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $PSScriptRoot 'dist' }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
@@ -10,7 +10,9 @@ $sumLines = @(Get-ChildItem -LiteralPath $folder -File -Recurse | Where-Object {
 [System.IO.File]::WriteAllLines($manifestPath,$sumLines,[System.Text.UTF8Encoding]::new($false))
 $zip = Join-Path $OutputRoot ("AirPodsMicBridge-$Version.zip")
 Compress-Archive -LiteralPath $folder -DestinationPath $zip -CompressionLevel Optimal -Force
-$releaseFiles = @($exe,$zip,(Join-Path $folder 'README.md'),(Join-Path $folder 'README.ru.md'),(Join-Path $folder 'CHANGELOG.md'),(Join-Path $folder 'RELEASE_NOTES.md'),$manifestPath)
+$setup = Join-Path $OutputRoot ("AirPodsMicBridge-$Version-Setup.exe")
+if (!(Test-Path -LiteralPath $setup)) { throw 'Build the installer before packaging the release' }
+$releaseFiles = @($exe,$zip,$setup,(Join-Path $folder 'README.md'),(Join-Path $folder 'README.ru.md'),(Join-Path $folder 'CHANGELOG.md'),(Join-Path $folder 'RELEASE_NOTES.md'),$manifestPath)
 $releaseSums = @(Get-Item -LiteralPath $releaseFiles | ForEach-Object { '{0} *{1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash,$_.Name })
 [System.IO.File]::WriteAllLines((Join-Path $OutputRoot ("AirPodsMicBridge-$Version-SHA256SUMS.txt")),$releaseSums,[System.Text.UTF8Encoding]::new($false))
 Get-Item -LiteralPath $zip | Select-Object FullName,Length

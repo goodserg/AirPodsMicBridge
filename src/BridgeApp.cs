@@ -11,28 +11,64 @@ using System.Reflection;
 
 [assembly: AssemblyTitle("AirPods Mic Bridge")]
 [assembly: AssemblyProduct("AirPods Mic Bridge")]
-[assembly: AssemblyDescription("AirPods microphone control for R7 Team")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyDescription("AirPods microphone control for Windows applications")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
-namespace MagicPodsR7Bridge
+namespace AirPodsMicBridge
 {
     internal static class Program
     {
-        internal const string StopName = @"Local\AirPodsMicBridge.Stop.v1";
-        [STAThread]
-        private static void Main(string[] args)
+        internal static readonly string StopName = ScopedName(@"Local\AirPodsMicBridge.Stop.v1");
+        internal static readonly string SingletonName = ScopedName(@"Local\AirPodsMicBridge.Singleton.v1");
+        internal static readonly string DiagnosticName = ScopedName(@"Local\AirPodsMicBridge.Diagnostics.v1");
+
+        private static string ScopedName(string name)
         {
+            if (String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AIRPODS_MIC_BRIDGE_DATA"))) return name;
+            using (var hash = System.Security.Cryptography.SHA256.Create())
+                return name + "." + BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(
+                    PreferenceStore.DataDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant()))).Replace("-", "");
+        }
+        [STAThread]
+        private static int Main(string[] args)
+        {
+            bool openDiagnostics = args.Length == 1 && args[0] == "--diagnostics";
+            if (openDiagnostics)
+            {
+                try { using (var signal = EventWaitHandle.OpenExisting(DiagnosticName)) signal.Set(); return 0; }
+                catch (WaitHandleCannotBeOpenedException) { }
+            }
+            if (args.Length == 1 && (args[0] == "--startup-enable" || args[0] == "--startup-disable" ||
+                args[0] == "--startup-enable-all-users" || args[0] == "--startup-disable-all-users"))
+            {
+                try
+                {
+                    if (args[0].EndsWith("-all-users", StringComparison.Ordinal))
+                        StartupRegistration.SetEnabledForAllUsers(args[0] == "--startup-enable-all-users", Application.ExecutablePath);
+                    else StartupRegistration.SetEnabled(args[0] == "--startup-enable", Application.ExecutablePath);
+                    return 0;
+                }
+                catch { return 1; }
+            }
             if (args.Length == 1 && args[0] == "--stop")
             {
                 try { using (var signal = EventWaitHandle.OpenExisting(StopName)) signal.Set(); }
                 catch (WaitHandleCannotBeOpenedException) { }
-                return;
+                var until = Stopwatch.StartNew();
+                while (until.ElapsedMilliseconds < 10000)
+                {
+                    try { using (Mutex.OpenExisting(SingletonName)) { } }
+                    catch (WaitHandleCannotBeOpenedException) { return 0; }
+                    Thread.Sleep(50);
+                }
+                return 1;
             }
+            if (args.Length == 1 && args[0] == "--autostart" && !StartupRegistration.AutoStartAllowed) return 0;
             bool owner;
-            using (var singleton = new Mutex(true, @"Local\AirPodsMicBridge.Singleton.v1", out owner))
+            using (var singleton = new Mutex(true, SingletonName, out owner))
             {
-                if (!owner) return;
+                if (!owner) return 0;
                 try
                 {
                     Localization.SetLanguage(PreferenceStore.Load().Language);
@@ -40,7 +76,7 @@ namespace MagicPodsR7Bridge
                     Directory.CreateDirectory(logs);
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    Application.Run(new BridgeContext(logs));
+                    Application.Run(new BridgeContext(logs, openDiagnostics));
                 }
                 catch (Exception ex)
                 {
@@ -49,6 +85,7 @@ namespace MagicPodsR7Bridge
                 }
                 finally { singleton.ReleaseMutex(); }
             }
+            return 0;
         }
     }
 
@@ -134,12 +171,16 @@ namespace MagicPodsR7Bridge
         private readonly ConcurrentQueue<Gesture> gestures = new ConcurrentQueue<Gesture>();
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private readonly EventWaitHandle externalStop;
+        private readonly EventWaitHandle externalDiagnostics;
         private readonly Thread audioWorker;
         private readonly NotifyIcon tray;
         private readonly UiFeedback feedback;
         private readonly BridgePreferences preferences;
         private readonly ToolStripMenuItem enabledItem;
         private readonly ToolStripMenuItem popupItem;
+        private readonly ToolStripMenuItem startupItem;
+        private readonly ToolStripMenuItem diagnosticItem;
+        private DiagnosticForm diagnosticForm;
         private readonly ToolStripMenuItem stateItem;
         private readonly ContextMenuStrip menu;
         private readonly ToolStripMenuItem languageItem, themeItem, exitItem;
@@ -167,13 +208,14 @@ namespace MagicPodsR7Bridge
         private long lastAppearanceCheck;
         private readonly ConcurrentQueue<FeedbackNotice> notices = new ConcurrentQueue<FeedbackNotice>();
 
-        internal BridgeContext(string logDirectory)
+        internal BridgeContext(string logDirectory, bool openDiagnostics = false)
         {
             string run = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Process.GetCurrentProcess().Id;
             log = new StreamWriter(Path.Combine(logDirectory, run + ".jsonl"), false, new System.Text.UTF8Encoding(false));
             log.AutoFlush = true;
             externalStop = new EventWaitHandle(false, EventResetMode.ManualReset, Program.StopName);
             externalStop.Reset();
+            externalDiagnostics = new EventWaitHandle(openDiagnostics, EventResetMode.AutoReset, Program.DiagnosticName);
             preferences = PreferenceStore.Load();
             Localization.SetLanguage(preferences.Language);
             Appearance.SetTheme(Appearance.ResolveTheme(preferences.Theme));
@@ -182,7 +224,7 @@ namespace MagicPodsR7Bridge
             feedback = new UiFeedback();
             feedback.ShowNotificationCard = preferences.ShowNotificationCard;
             menu = new ContextMenuStrip();
-            stateItem = new ToolStripMenuItem(Localization.Get("waitingR7")) { Enabled = false };
+            stateItem = new ToolStripMenuItem(Localization.Get("waitingMicrophone")) { Enabled = false };
             enabledItem = new ToolStripMenuItem(Localization.Get("controlEnabled")) { Checked = true, CheckOnClick = true };
             enabledItem.CheckedChanged += delegate
             {
@@ -204,6 +246,24 @@ namespace MagicPodsR7Bridge
                 SavePreferences();
             };
             menu.Items.Add(popupItem);
+            startupItem = new ToolStripMenuItem(Localization.Get("startWithWindows")) { Checked = StartupRegistration.IsEnabled };
+            startupItem.Click += delegate
+            {
+                try
+                {
+                    StartupRegistration.SetEnabled(!StartupRegistration.IsEnabled, Application.ExecutablePath);
+                    startupItem.Checked = StartupRegistration.IsEnabled;
+                }
+                catch (Exception ex)
+                {
+                    WriteLog("startup-setting-error", new { message = ex.Message });
+                    feedback.ShowMessage(Localization.Get("startupSettingFailed"));
+                }
+            };
+            menu.Items.Add(startupItem);
+            diagnosticItem = new ToolStripMenuItem(Localization.Get("diagnosticTitle"), null, delegate { OpenDiagnostics(); });
+            menu.Items.Add(diagnosticItem);
+            menu.Opening += delegate { startupItem.Checked = StartupRegistration.IsEnabled; };
             menu.Items.Add(new ToolStripSeparator());
             themeItem = new ToolStripMenuItem();
             languageItem = new ToolStripMenuItem();
@@ -241,6 +301,7 @@ namespace MagicPodsR7Bridge
             uiTimer.Tick += delegate
             {
                 if (externalStop.WaitOne(0)) { ExitThread(); return; }
+                if (externalDiagnostics.WaitOne(0)) OpenDiagnostics();
                 if (lastAppearanceCheck == 0 || CachedAudio.Elapsed(lastAppearanceCheck) >= 1000)
                 {
                     RefreshAppearance();
@@ -257,11 +318,43 @@ namespace MagicPodsR7Bridge
             uiTimer.Start();
         }
 
+        private void OpenDiagnostics()
+        {
+            if (diagnosticForm != null && !diagnosticForm.IsDisposed)
+            {
+                ShowWindow(diagnosticForm.Handle, 1);
+                diagnosticForm.Activate();
+                return;
+            }
+            diagnosticForm = new DiagnosticForm(delegate(bool active)
+            {
+                if (stopping) return;
+                enabledItem.Enabled = !active;
+                enabled = !active && enabledItem.Checked;
+                Interlocked.Increment(ref generation);
+                wake.Set();
+                UpdateTray();
+            });
+            diagnosticForm.FormClosed += delegate { diagnosticForm = null; };
+            diagnosticForm.Show();
+            // Background startup may supply SW_HIDE for the process's first window.
+            // Opening diagnostics is an explicit request to show this window.
+            ShowWindow(diagnosticForm.Handle, 1);
+            diagnosticForm.Activate();
+        }
+
         private IntPtr HandleKey(int code, IntPtr wParam, IntPtr lParam)
         {
             if (code >= 0 && !stopping)
             {
                 var data = (KeyboardData)Marshal.PtrToStructure(lParam, typeof(KeyboardData));
+                DiagnosticSession diagnostic = diagnosticForm == null ? null : diagnosticForm.ActiveSession;
+                if (diagnostic != null && diagnostic.IsRunning)
+                {
+                    int message = wParam.ToInt32();
+                    if (message == WmKeyDown || message == WmSysKeyDown || message == WmKeyUp || message == WmSysKeyUp)
+                        diagnostic.RecordMediaKey(data.VkCode, data.ScanCode, data.Flags, message == WmKeyDown || message == WmSysKeyDown);
+                }
                 if (data.VkCode == 0xB3)
                 {
                     bool injected = (data.Flags & 0x10) != 0;
@@ -311,7 +404,7 @@ namespace MagicPodsR7Bridge
 
         private void AudioLoop()
         {
-            WriteLog("started", new { version = "1.2.0", processId = Process.GetCurrentProcess().Id });
+            WriteLog("started", new { version = "1.3.0", processId = Process.GetCurrentProcess().Id });
             CapturePeakMeter meter = null;
             string measuredEndpointId = null;
             long lastStateRead = 0;
@@ -451,8 +544,8 @@ namespace MagicPodsR7Bridge
                 icon = measured ? levelIcons[(int)Math.Round(displayedLevel * 8)] : readyIcon;
             }
             if (muted != false || !enabled) displayedLevel = 0;
-            stateItem.Text = text;
-            if (!available) stateItem.Text += Localization.Get("waitingR7Suffix");
+            string stateText = available ? text : text + Localization.Get("waitingMicrophoneSuffix");
+            if (stateItem.Text != stateText) stateItem.Text = stateText;
             if (lastTooltip != text) { lastTooltip = text; tray.Text = text.Length > 63 ? text.Substring(0, 62) + "…" : text; }
             if (displayedIcon != icon) { displayedIcon = icon; tray.Icon = icon; }
         }
@@ -492,6 +585,8 @@ namespace MagicPodsR7Bridge
         private void RefreshMenuText()
         {
             enabledItem.Text = Localization.Get("controlEnabled");
+            startupItem.Text = Localization.Get("startWithWindows");
+            diagnosticItem.Text = Localization.Get("diagnosticTitle");
             popupItem.Text = Localization.Get("showCard");
             languageItem.Text = Localization.Get("language");
             themeItem.Text = Localization.Get("theme");
@@ -523,6 +618,7 @@ namespace MagicPodsR7Bridge
                 Appearance.SetTheme(theme);
                 Appearance.ApplyMenu(menu);
                 feedback.UpdateAppearance();
+                if (diagnosticForm != null) diagnosticForm.UpdateAppearance();
             }
             if (trayTheme != Appearance.CurrentTrayTheme)
             {
@@ -562,6 +658,7 @@ namespace MagicPodsR7Bridge
         {
             if (stopping) return;
             stopping = true;
+            if (diagnosticForm != null) diagnosticForm.Close();
             enabled = false;
             Interlocked.Increment(ref generation);
             uiTimer.Stop();
@@ -576,6 +673,7 @@ namespace MagicPodsR7Bridge
             foreach (Icon icon in levelIcons) icon.Dispose();
             uiTimer.Dispose();
             externalStop.Dispose();
+            externalDiagnostics.Dispose();
             // Exiting does not unmute the user's microphone.
             base.ExitThreadCore();
         }
@@ -586,6 +684,7 @@ namespace MagicPodsR7Bridge
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
         [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)] private static extern IntPtr GetModuleHandle(string name);
     }
 }

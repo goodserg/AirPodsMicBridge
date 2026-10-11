@@ -6,7 +6,7 @@ using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace MagicPodsR7Bridge
+namespace AirPodsMicBridge
 {
     // Construct and call on the application's WinForms UI thread.
     public sealed class UiFeedback : IDisposable
