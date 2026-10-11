@@ -1,7 +1,5 @@
 using System;
 using System.IO;
-using System.Reflection;
-using System.Runtime.InteropServices;
 
 namespace AirPodsMicBridge
 {
@@ -59,29 +57,8 @@ namespace AirPodsMicBridge
 
         private static void WriteShortcut(string shortcutPath, string target)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath));
-            object shell = null, shortcut = null;
-            try
-            {
-                shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
-                shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
-                Set(shortcut, "TargetPath", target);
-                Set(shortcut, "Arguments", "--autostart");
-                Set(shortcut, "WorkingDirectory", Path.GetDirectoryName(target));
-                Set(shortcut, "IconLocation", target + ",0");
-                Set(shortcut, "Description", "AirPods Mic Bridge");
-                shortcut.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            }
-            finally
-            {
-                if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.ReleaseComObject(shortcut);
-                if (shell != null && Marshal.IsComObject(shell)) Marshal.ReleaseComObject(shell);
-            }
+            ShellShortcut.Write(shortcutPath, target, "--autostart", Path.GetDirectoryName(target));
         }
 
-        private static void Set(object shortcut, string name, string value)
-        {
-            shortcut.GetType().InvokeMember(name, BindingFlags.SetProperty, null, shortcut, new object[] { value });
-        }
     }
 }

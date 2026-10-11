@@ -189,12 +189,7 @@ internal static class StartupChecks
         object shell = null, shortcut = null;
         try
         {
-            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
-            shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
-            Set(shortcut, "TargetPath", executable, path);
-            Set(shortcut, "Arguments", arguments, path);
-            Set(shortcut, "WorkingDirectory", workingDirectory, path);
-            shortcut.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+            ShellShortcut.Write(path, executable, arguments, workingDirectory);
         }
         catch (Exception ex)
         {
@@ -212,18 +207,6 @@ internal static class StartupChecks
     private static string Get(object value, string name)
     {
         return Convert.ToString(value.GetType().InvokeMember(name, BindingFlags.GetProperty, null, value, null));
-    }
-
-    private static void Set(object value, string name, string text, string shortcutPath)
-    {
-        try { value.GetType().InvokeMember(name, BindingFlags.SetProperty, null, value, new object[] { text }); }
-        catch (Exception ex)
-        {
-            Exception cause = ex.GetBaseException();
-            throw new InvalidOperationException("Fixture shortcut field=" + name + "; value=" + text +
-                "; valueLength=" + (text == null ? 0 : text.Length) + "; shortcut=" + shortcutPath +
-                "; deepestType=" + cause.GetType().FullName + "; deepestHResult=0x" + cause.HResult.ToString("X8"), ex);
-        }
     }
 
     private static void Release(object value)
