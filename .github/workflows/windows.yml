@@ -1,0 +1,31 @@
+name: Windows build and checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build
+        shell: pwsh
+        run: ./build.ps1
+      - name: Check localization and presentation
+        shell: pwsh
+        run: ./test.ps1
+      - name: Package
+        shell: pwsh
+        run: ./package.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: AirPodsMicBridge-windows-x64
+          path: |
+            dist/AirPodsMicBridge-*.zip
+            dist/AirPodsMicBridge-*-SHA256SUMS.txt
+          if-no-files-found: error

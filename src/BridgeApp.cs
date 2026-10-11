@@ -9,11 +9,11 @@ using System.Windows.Forms;
 using System.Web.Script.Serialization;
 using System.Reflection;
 
-[assembly: AssemblyTitle("AirPods — микрофон")]
+[assembly: AssemblyTitle("AirPods Mic Bridge")]
 [assembly: AssemblyProduct("AirPods Mic Bridge")]
-[assembly: AssemblyDescription("Переключение микрофона AirPods в Р7-Команда")]
-[assembly: AssemblyVersion("1.1.1.0")]
-[assembly: AssemblyFileVersion("1.1.1.0")]
+[assembly: AssemblyDescription("AirPods microphone control for R7 Team")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace MagicPodsR7Bridge
 {
@@ -35,17 +35,16 @@ namespace MagicPodsR7Bridge
                 if (!owner) return;
                 try
                 {
-                    var temp = @"D:\codex\tmp\AirPodsMicBridge";
-                    Directory.CreateDirectory(temp);
-                    Environment.SetEnvironmentVariable("TEMP", temp);
-                    Environment.SetEnvironmentVariable("TMP", temp);
+                    Localization.SetLanguage(PreferenceStore.Load().Language);
+                    var logs = Path.Combine(PreferenceStore.DataDirectory, "logs");
+                    Directory.CreateDirectory(logs);
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    Application.Run(new BridgeContext(temp));
+                    Application.Run(new BridgeContext(logs));
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Не удалось запустить AirPods Mic Bridge.\n" + ex.Message,
+                    MessageBox.Show(Localization.Get("startupError", ex.Message),
                         "AirPods Mic Bridge", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 finally { singleton.ReleaseMutex(); }
@@ -95,13 +94,18 @@ namespace MagicPodsR7Bridge
     public sealed class BridgePreferences
     {
         public bool ShowNotificationCard { get; set; }
+        public string Language { get; set; }
+        public string Theme { get; set; }
+
+        public BridgePreferences() { Language = "auto"; Theme = "auto"; }
     }
 
     internal static class PreferenceStore
     {
-        internal static readonly string SettingsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AirPodsMicBridge", "settings.json");
+        internal static readonly string DataDirectory = String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AIRPODS_MIC_BRIDGE_DATA")) ?
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AirPodsMicBridge") :
+            Path.GetFullPath(Environment.GetEnvironmentVariable("AIRPODS_MIC_BRIDGE_DATA"));
+        internal static readonly string SettingsPath = Path.Combine(DataDirectory, "settings.json");
 
         internal static BridgePreferences Load()
         {
@@ -137,8 +141,10 @@ namespace MagicPodsR7Bridge
         private readonly ToolStripMenuItem enabledItem;
         private readonly ToolStripMenuItem popupItem;
         private readonly ToolStripMenuItem stateItem;
+        private readonly ContextMenuStrip menu;
+        private readonly ToolStripMenuItem languageItem, themeItem, exitItem;
         private readonly System.Windows.Forms.Timer uiTimer;
-        private readonly Icon readyIcon, mutedIcon, waitingIcon;
+        private Icon readyIcon, mutedIcon, waitingIcon;
         private readonly Icon[] levelIcons = new Icon[9];
         private readonly StreamWriter log;
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
@@ -158,6 +164,7 @@ namespace MagicPodsR7Bridge
         private string observedEndpointId;
         private Icon displayedIcon;
         private float displayedLevel;
+        private long lastAppearanceCheck;
         private readonly ConcurrentQueue<FeedbackNotice> notices = new ConcurrentQueue<FeedbackNotice>();
 
         internal BridgeContext(string logDirectory)
@@ -167,16 +174,16 @@ namespace MagicPodsR7Bridge
             log.AutoFlush = true;
             externalStop = new EventWaitHandle(false, EventResetMode.ManualReset, Program.StopName);
             externalStop.Reset();
-            readyIcon = UiFeedback.CreateTrayIcon(Color.FromArgb(194, 148, 143));
-            mutedIcon = UiFeedback.CreateTrayIcon(Color.FromArgb(255, 36, 69));
-            waitingIcon = UiFeedback.CreateTrayIcon(Color.Gray);
-            for (int i = 0; i < levelIcons.Length; i++) levelIcons[i] = UiFeedback.CreateLevelTrayIcon(i / 8.0f);
-            feedback = new UiFeedback();
             preferences = PreferenceStore.Load();
+            Localization.SetLanguage(preferences.Language);
+            Appearance.SetTheme(Appearance.ResolveTheme(preferences.Theme));
+            Appearance.SetTrayTheme(Appearance.ResolveTrayTheme());
+            ReplaceTrayIcons();
+            feedback = new UiFeedback();
             feedback.ShowNotificationCard = preferences.ShowNotificationCard;
-            var menu = new ContextMenuStrip();
-            stateItem = new ToolStripMenuItem("Ожидание микрофона Р7") { Enabled = false };
-            enabledItem = new ToolStripMenuItem("Управление микрофоном включено") { Checked = true, CheckOnClick = true };
+            menu = new ContextMenuStrip();
+            stateItem = new ToolStripMenuItem(Localization.Get("waitingR7")) { Enabled = false };
+            enabledItem = new ToolStripMenuItem(Localization.Get("controlEnabled")) { Checked = true, CheckOnClick = true };
             enabledItem.CheckedChanged += delegate
             {
                 enabled = enabledItem.Checked;
@@ -186,7 +193,7 @@ namespace MagicPodsR7Bridge
             };
             menu.Items.Add(stateItem);
             menu.Items.Add(enabledItem);
-            popupItem = new ToolStripMenuItem("Показывать всплывающую карточку")
+            popupItem = new ToolStripMenuItem(Localization.Get("showCard"))
             {
                 Checked = preferences.ShowNotificationCard, CheckOnClick = true
             };
@@ -194,13 +201,29 @@ namespace MagicPodsR7Bridge
             {
                 preferences.ShowNotificationCard = popupItem.Checked;
                 feedback.ShowNotificationCard = popupItem.Checked;
-                try { PreferenceStore.Save(preferences); }
-                catch (Exception ex) { WriteLog("settings-error", new { message = ex.Message }); }
+                SavePreferences();
             };
             menu.Items.Add(popupItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Выход", null, delegate { ExitThread(); });
-            tray = new NotifyIcon { Icon = waitingIcon, Text = "AirPods: ожидание микрофона Р7", ContextMenuStrip = menu, Visible = true };
+            themeItem = new ToolStripMenuItem();
+            languageItem = new ToolStripMenuItem();
+            AddChoice(themeItem, "auto", null, delegate { SelectTheme("auto"); });
+            AddChoice(themeItem, "light", null, delegate { SelectTheme("light"); });
+            AddChoice(themeItem, "dark", null, delegate { SelectTheme("dark"); });
+            AddChoice(languageItem, "auto", null, delegate { SelectLanguage("auto"); });
+            foreach (LanguageOption option in Localization.Languages)
+            {
+                string code = option.Code;
+                AddChoice(languageItem, code, option.NativeName, delegate { SelectLanguage(code); });
+            }
+            menu.Items.Add(themeItem);
+            menu.Items.Add(languageItem);
+            menu.Items.Add(new ToolStripSeparator());
+            exitItem = new ToolStripMenuItem(String.Empty, null, delegate { ExitThread(); });
+            menu.Items.Add(exitItem);
+            tray = new NotifyIcon { Icon = waitingIcon, Text = Localization.Get("tooltipWaiting"), ContextMenuStrip = menu, Visible = true };
+            RefreshMenuText();
+            Appearance.ApplyMenu(menu);
             tray.DoubleClick += delegate
             {
                 UpdateTray();
@@ -218,6 +241,11 @@ namespace MagicPodsR7Bridge
             uiTimer.Tick += delegate
             {
                 if (externalStop.WaitOne(0)) { ExitThread(); return; }
+                if (lastAppearanceCheck == 0 || CachedAudio.Elapsed(lastAppearanceCheck) >= 1000)
+                {
+                    RefreshAppearance();
+                    lastAppearanceCheck = Stopwatch.GetTimestamp();
+                }
                 UpdateTray();
                 FeedbackNotice notice;
                 while (notices.TryDequeue(out notice))
@@ -283,7 +311,7 @@ namespace MagicPodsR7Bridge
 
         private void AudioLoop()
         {
-            WriteLog("started", new { version = "1.1.1", processId = Process.GetCurrentProcess().Id });
+            WriteLog("started", new { version = "1.2.0", processId = Process.GetCurrentProcess().Id });
             CapturePeakMeter meter = null;
             string measuredEndpointId = null;
             long lastStateRead = 0;
@@ -341,7 +369,7 @@ namespace MagicPodsR7Bridge
                             catch (Exception ex)
                             {
                                 WriteLog("error", new { message = ex.Message, hresult = ex.HResult });
-                                notices.Enqueue(new FeedbackNotice { Message = "Не удалось переключить микрофон" });
+                                notices.Enqueue(new FeedbackNotice { Message = Localization.Get("toggleFailed") });
                                 cached = null;
                             }
                             finally { Interlocked.Exchange(ref pending, 0); }
@@ -404,12 +432,12 @@ namespace MagicPodsR7Bridge
             feedback.UpdateIndicator(muted);
             string text;
             Icon icon;
-            if (muted == true) { text = "AirPods: микрофон выключен"; icon = mutedIcon; }
-            else if (!enabled) { text = "AirPods: управление приостановлено"; icon = waitingIcon; }
-            else if (!muted.HasValue) { text = "AirPods: ожидание подключения"; icon = waitingIcon; }
+            if (muted == true) { text = Localization.Get("tooltipMuted"); icon = mutedIcon; }
+            else if (!enabled) { text = Localization.Get("tooltipPaused"); icon = waitingIcon; }
+            else if (!muted.HasValue) { text = Localization.Get("tooltipWaiting"); icon = waitingIcon; }
             else
             {
-                text = "AirPods: микрофон включён";
+                text = Localization.Get("tooltipLive");
                 MeterReading reading = cachedMeter;
                 float level = 0;
                 bool measured = reading != null && microphone != null && reading.EndpointId == microphone.EndpointId &&
@@ -424,9 +452,110 @@ namespace MagicPodsR7Bridge
             }
             if (muted != false || !enabled) displayedLevel = 0;
             stateItem.Text = text;
-            if (!available) stateItem.Text += " · ожидание Р7";
-            if (lastTooltip != text) { lastTooltip = text; tray.Text = text; }
+            if (!available) stateItem.Text += Localization.Get("waitingR7Suffix");
+            if (lastTooltip != text) { lastTooltip = text; tray.Text = text.Length > 63 ? text.Substring(0, 62) + "…" : text; }
             if (displayedIcon != icon) { displayedIcon = icon; tray.Icon = icon; }
+        }
+
+        private static void AddChoice(ToolStripMenuItem parent, string code, string text, EventHandler handler)
+        {
+            var item = new ToolStripMenuItem(text ?? String.Empty) { Tag = code };
+            item.Click += handler;
+            parent.DropDownItems.Add(item);
+        }
+
+        private void SavePreferences()
+        {
+            try { PreferenceStore.Save(preferences); }
+            catch (Exception ex) { WriteLog("settings-error", new { message = ex.Message }); }
+        }
+
+        private void SelectLanguage(string code)
+        {
+            preferences.Language = code;
+            Localization.SetLanguage(code);
+            SavePreferences();
+            RefreshMenuText();
+            feedback.UpdateAppearance();
+            lastTooltip = null;
+            UpdateTray();
+        }
+
+        private void SelectTheme(string code)
+        {
+            preferences.Theme = code;
+            SavePreferences();
+            RefreshMenuText();
+            RefreshAppearance();
+        }
+
+        private void RefreshMenuText()
+        {
+            enabledItem.Text = Localization.Get("controlEnabled");
+            popupItem.Text = Localization.Get("showCard");
+            languageItem.Text = Localization.Get("language");
+            themeItem.Text = Localization.Get("theme");
+            exitItem.Text = Localization.Get("exit");
+            string language = Localization.ResolveLanguage(preferences.Language, System.Globalization.CultureInfo.CurrentUICulture);
+            foreach (ToolStripMenuItem item in languageItem.DropDownItems)
+            {
+                string code = (string)item.Tag;
+                if (code == "auto") item.Text = Localization.Get("automatic");
+                bool automatic = !Array.Exists(Localization.Languages, option =>
+                    String.Equals(option.Code, preferences.Language, StringComparison.OrdinalIgnoreCase));
+                item.Checked = automatic ? code == "auto" : code == language;
+            }
+            foreach (ToolStripMenuItem item in themeItem.DropDownItems)
+            {
+                string code = (string)item.Tag;
+                item.Text = Localization.Get(code == "auto" ? "automatic" : code);
+                string selected = preferences.Theme == "light" || preferences.Theme == "dark" ? preferences.Theme : "auto";
+                item.Checked = code == selected;
+            }
+        }
+
+        private void RefreshAppearance()
+        {
+            AppTheme theme = Appearance.ResolveTheme(preferences.Theme);
+            AppTheme trayTheme = Appearance.ResolveTrayTheme();
+            if (theme != Appearance.CurrentTheme)
+            {
+                Appearance.SetTheme(theme);
+                Appearance.ApplyMenu(menu);
+                feedback.UpdateAppearance();
+            }
+            if (trayTheme != Appearance.CurrentTrayTheme)
+            {
+                Appearance.SetTrayTheme(trayTheme);
+                ReplaceTrayIcons();
+            }
+        }
+
+        // Build the replacement cache before releasing any icon used by NotifyIcon.
+        private void ReplaceTrayIcons()
+        {
+            var replacements = new Icon[12];
+            try
+            {
+                replacements[0] = UiFeedback.CreateTrayIcon(Appearance.TrayOutlineColor);
+                replacements[1] = UiFeedback.CreateTrayIcon(Color.FromArgb(255, 36, 69));
+                replacements[2] = UiFeedback.CreateTrayIcon(Color.Gray);
+                for (int i = 0; i < 9; i++) replacements[3 + i] = UiFeedback.CreateLevelTrayIcon(i / 8.0f);
+            }
+            catch
+            {
+                foreach (Icon icon in replacements) if (icon != null) icon.Dispose();
+                throw;
+            }
+            Icon oldReady = readyIcon, oldMuted = mutedIcon, oldWaiting = waitingIcon;
+            Icon[] oldLevels = (Icon[])levelIcons.Clone();
+            readyIcon = replacements[0]; mutedIcon = replacements[1]; waitingIcon = replacements[2];
+            Array.Copy(replacements, 3, levelIcons, 0, 9);
+            if (tray != null) { displayedIcon = null; UpdateTray(); }
+            if (oldReady != null) oldReady.Dispose();
+            if (oldMuted != null) oldMuted.Dispose();
+            if (oldWaiting != null) oldWaiting.Dispose();
+            foreach (Icon icon in oldLevels) if (icon != null) icon.Dispose();
         }
 
         protected override void ExitThreadCore()
@@ -441,6 +570,7 @@ namespace MagicPodsR7Bridge
             audioWorker.Join(1500);
             tray.Visible = false;
             tray.Dispose();
+            menu.Dispose();
             feedback.Dispose();
             readyIcon.Dispose(); mutedIcon.Dispose(); waitingIcon.Dispose();
             foreach (Icon icon in levelIcons) icon.Dispose();

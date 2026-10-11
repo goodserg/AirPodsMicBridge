@@ -16,9 +16,7 @@ namespace MagicPodsR7Bridge
         private bool disposed;
         private bool showNotificationCard;
         private bool? observedMuted;
-        private static readonly Color MutedColor = Color.FromArgb(255, 36, 69);
         private static readonly Color LiveColor = Color.FromArgb(22, 128, 74);
-        private static readonly Color NeutralColor = Color.FromArgb(100, 116, 139);
         private static readonly Bitmap MutedOsdGlyph = DecodeGlyph("iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAB8ElEQVR4nNWXvW4TQRCAP49SIh1KGwpDm4I8gCtq8wauoM0jOA2i5g2cAh4gT+BQ5AESCfqjoUXmCQatmBWj5ezkbuNz5pNWd567Pe/s/OzMRFWJjBAcIThCcITgCMERgiMERwiOEBwhOEJw5BG+cQG0QCqqNsAlcMJITCqLuVvgrEP+A5gBP3nCFli4xScrvADe2uKnwGfGQFWHjrX+5bKQz/QfTcX3ecioscAru14X8m/u/hkBs9BvRkQIjhzwv1OWKjmNokDKWjd2zZwD3wvZvRxxGPLh88HJ8n1Kwc2DY6kihbWWKhcdzzInO+Yv9X9WY6bRWj4WKfgOeN/3I30UOLWapzUTbyO5gGdtc+aFPPn6G/f7zOqofvQwVzpVMzMzd+K2cJULk7cdc8p31FzJu1N5su8cQ8uHT6o6VdWNW+zalMksLT66yoq84GWHbLVPBRbFjs5cMHuWpmC7Y1e9RfKY9w3iIdknW2HjMtDc7XhTKNbek42oGUP6gRSkX12wpvL5CvgFHAOvXXDuvy/QYZo3Fge7WO9z57XChfyYmtt4tzofY+Fa4ULburMv5jIvGZGjyvmNNS3PnSw39HvvhxO1FlgB77Y8mzACQnAmjxQDB0MIjhAcIThCcITgCMERgiMERwiOEBw59AJq+QP1tP/uRiMHrwAAAABJRU5ErkJggg==");
         private static readonly Bitmap LiveOsdGlyph = DecodeGlyph("iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAABS0lEQVR4nO3XsU3EMBQG4N8WJVIQLU1ES8ECqagzwo3ACMcKbMCtwASBEa5ggNBci2CCHxlepHcmSuXAs3ifFCVyFN+zY997AZxzzjnnXFEk70iO/PZOckfyAjUguee80fwgSG5UwNsUMMlevY0BlpEcJNBd1t6pgTUlfzOW7AzApZyfsvYXdX1qeQCzQggfWElE5SIqF1G5iMpFVC7iPw+A5JVk2XEpQZFsZxJeeqbHX0pBqwybsu2DXO913SPF3VQPHT0DQ+XDfZppqT6nYIesuNtm9VJjrYDr5JiKN2bBt+reUb1k5S2k2d9IW69mvMkGVqy0DiU6kU36DGDarK8AHgG8ATgHcA3gRt3rQggHWCKznPbBkqGGj5pWlo1eVrfmA1/Y3CNWdFK6Q/lrTB8tZ6rta/bNrfs5Kpn9gBXENTp1zjnnnHP4FZ8Ypd3stgL3AQAAAABJRU5ErkJggg==");
 
@@ -45,7 +43,18 @@ namespace MagicPodsR7Bridge
             observedMuted = muted;
             osd.ShowState(muted);
             if (showNotificationCard)
-                card.ShowContent(muted ? "Микрофон выключен" : "Микрофон включён", muted);
+                card.ShowContent(MicrophoneMessage(muted), muted);
+        }
+
+        public void UpdateAppearance()
+        {
+            ThrowIfDisposed();
+            card.UpdateAppearance();
+        }
+
+        private static string MicrophoneMessage(bool muted)
+        {
+            return Localization.Get(muted ? "microphoneMuted" : "microphoneLive");
         }
 
         // Observer updates do not show a card or restart the green hide timer.
@@ -116,7 +125,7 @@ namespace MagicPodsR7Bridge
             {
                 using (Graphics graphics = Graphics.FromImage(bitmap))
                 using (GraphicsPath capsule = RoundedRectangle(new RectangleF(11.5f, 3.5f, 9, 16), 4.5f))
-                using (SolidBrush fill = new SolidBrush(Color.FromArgb(22, 163, 106)))
+                using (SolidBrush fill = new SolidBrush(Appearance.TrayLevelColor))
                 {
                     ConfigureGraphics(graphics);
                     graphics.Clear(Color.Transparent);
@@ -124,7 +133,7 @@ namespace MagicPodsR7Bridge
                     graphics.SetClip(capsule, CombineMode.Intersect);
                     graphics.FillRectangle(fill, 11.5f, 3.5f + 16 * (1 - level), 9, 16 * level);
                     graphics.Restore(previous);
-                    DrawTrayMicrophone(graphics, Color.FromArgb(194, 148, 143), false);
+                    DrawTrayMicrophone(graphics, Appearance.TrayOutlineColor, false);
                 }
                 return CloneIcon(bitmap);
             }
@@ -158,7 +167,7 @@ namespace MagicPodsR7Bridge
 
         public static Bitmap CreateCardPreview(bool muted)
         {
-            return CreateCardPreview(muted ? "Микрофон выключен" : "Микрофон включён", muted);
+            return CreateCardPreview(MicrophoneMessage(muted), muted);
         }
 
         public static Bitmap CreateCardPreview(string message, bool? muted)
@@ -238,26 +247,26 @@ namespace MagicPodsR7Bridge
             GraphicsState previous = graphics.Save();
             graphics.ScaleTransform(sx, sy);
             using (GraphicsPath outline = RoundedRectangle(new RectangleF(0.5f, 0.5f, 339, 109), 12))
-            using (SolidBrush background = new SolidBrush(Color.FromArgb(252, 253, 255)))
-            using (Pen border = new Pen(Color.FromArgb(218, 225, 232), 1))
+            using (SolidBrush background = new SolidBrush(Appearance.BackgroundColor))
+            using (Pen border = new Pen(Appearance.BorderColor, 1))
             {
                 graphics.FillPath(background, outline);
                 graphics.DrawPath(border, outline);
             }
-            Color accent = muted.HasValue ? (muted.Value ? MutedColor : LiveColor) : NeutralColor;
-            Color tint = muted.HasValue ? (muted.Value ? Color.FromArgb(255, 235, 239) : Color.FromArgb(231, 246, 238)) : Color.FromArgb(238, 242, 246);
+            Color accent = Appearance.CardAccent(muted);
+            Color tint = Appearance.CardTint(muted);
             using (GraphicsPath tile = RoundedRectangle(new RectangleF(18, 33, 44, 44), 11))
             using (SolidBrush brush = new SolidBrush(tint)) graphics.FillPath(brush, tile);
             DrawMicrophone(graphics, new RectangleF(22, 37, 36, 36), accent, muted.HasValue && muted.Value);
             using (Font headerFont = new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel))
             using (Font bodyFont = new Font("Segoe UI", 17, FontStyle.Bold, GraphicsUnit.Pixel))
-            using (SolidBrush headerBrush = new SolidBrush(Color.FromArgb(99, 113, 130)))
-            using (SolidBrush bodyBrush = new SolidBrush(Color.FromArgb(31, 41, 55)))
+            using (SolidBrush headerBrush = new SolidBrush(Appearance.SecondaryTextColor))
+            using (SolidBrush bodyBrush = new SolidBrush(Appearance.ForegroundColor))
             using (StringFormat format = new StringFormat())
             {
                 format.Trimming = StringTrimming.EllipsisCharacter;
                 format.FormatFlags = StringFormatFlags.LineLimit;
-                graphics.DrawString("AirPods — микрофон", headerFont, headerBrush, new RectangleF(78, 19, 244, 20), format);
+                graphics.DrawString(Localization.Get("cardTitle"), headerFont, headerBrush, new RectangleF(78, 19, 244, 20), format);
                 graphics.DrawString(message, bodyFont, bodyBrush, new RectangleF(77, 42, 244, 54), format);
             }
             graphics.Restore(previous);
@@ -375,6 +384,16 @@ namespace MagicPodsR7Bridge
         {
             private string message = String.Empty;
             private bool? muted;
+            public CardWindow()
+            {
+                BackColor = Appearance.BackgroundColor;
+            }
+            public void UpdateAppearance()
+            {
+                if (muted.HasValue) message = MicrophoneMessage(muted.Value);
+                BackColor = Appearance.BackgroundColor;
+                Invalidate();
+            }
             public void ShowContent(string value, bool? state)
             {
                 message = value;
