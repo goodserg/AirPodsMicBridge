@@ -50,25 +50,34 @@ internal static class PresentationChecks
         {
             if (File.Exists(path)) File.Delete(path);
             BridgePreferences defaults = PreferenceStore.Load();
-            Assert(!defaults.ShowNotificationCard && defaults.Language == "auto" && defaults.Theme == "auto", "Fresh preferences must disable cards and use automatic language/theme.");
+            Assert(!defaults.ShowNotificationCard && defaults.Language == "auto" && defaults.Theme == "auto" && defaults.SoundNotifications,
+                "Fresh preferences must enable sound, disable cards and use automatic language/theme.");
             File.WriteAllText(path, "{\"ShowNotificationCard\":true}");
             BridgePreferences old = PreferenceStore.Load();
-            Assert(old.ShowNotificationCard && old.Language == "auto" && old.Theme == "auto", "Old card-only preferences must retain the option and acquire automatic defaults.");
+            Assert(old.ShowNotificationCard && old.Language == "auto" && old.Theme == "auto" && old.SoundNotifications,
+                "Old card-only preferences must retain the option and acquire automatic defaults with sound enabled.");
+            File.WriteAllText(path, "{\"ShowNotificationCard\":false,\"Language\":\"ru\",\"Theme\":\"dark\"}");
+            BridgePreferences migrated = PreferenceStore.Load();
+            Assert(migrated.SoundNotifications && !migrated.ShowNotificationCard && migrated.Language == "ru" && migrated.Theme == "dark",
+                "Upgrading pre-sound preferences must enable sound and retain every existing option.");
+            File.WriteAllText(path, "{\"SoundNotifications\":false}");
+            Assert(!PreferenceStore.Load().SoundNotifications, "Explicitly disabled sound must survive loading.");
             string[] themes = { "auto", "light", "dark" };
             foreach (LanguageOption language in Localization.Languages)
             {
                 foreach (string theme in themes)
                 {
-                    var expected = new BridgePreferences { Language = language.Code, Theme = theme, ShowNotificationCard = theme == "dark" };
+                    var expected = new BridgePreferences { Language = language.Code, Theme = theme, ShowNotificationCard = theme == "dark", SoundNotifications = theme != "light" };
                     PreferenceStore.Save(expected);
                     BridgePreferences actual = PreferenceStore.Load();
-                    Assert(actual.Language == expected.Language && actual.Theme == expected.Theme && actual.ShowNotificationCard == expected.ShowNotificationCard,
+                    Assert(actual.Language == expected.Language && actual.Theme == expected.Theme && actual.ShowNotificationCard == expected.ShowNotificationCard && actual.SoundNotifications == expected.SoundNotifications,
                         "Preference round trip failed: " + language.Code + "/" + theme);
                 }
             }
             File.WriteAllText(path, "{not valid JSON");
             BridgePreferences damaged = PreferenceStore.Load();
-            Assert(!damaged.ShowNotificationCard && damaged.Language == "auto" && damaged.Theme == "auto", "Damaged preferences must fall back to safe defaults.");
+            Assert(!damaged.ShowNotificationCard && damaged.Language == "auto" && damaged.Theme == "auto" && damaged.SoundNotifications,
+                "Damaged preferences must fall back to defaults, including sound enabled.");
             File.WriteAllText(path, "null");
             Assert(PreferenceStore.Load().Theme == "auto", "JSON null must fall back to defaults.");
         }
@@ -136,6 +145,7 @@ internal static class PresentationChecks
         theme.DropDownItems.Add(new ToolStripMenuItem(Localization.Get("dark")) { Enabled = false });
         menu.Items.Add(theme);
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("showCard")) { Checked = true });
+        menu.Items.Add(new ToolStripMenuItem(Localization.Get("soundNotifications")) { Checked = true });
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("startWithWindows")) { Checked = true });
         menu.Items.Add(new ToolStripMenuItem(Localization.Get("diagnosticTitle")));
         menu.Items.Add(new ToolStripSeparator());

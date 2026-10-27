@@ -12,8 +12,8 @@ using System.Reflection;
 [assembly: AssemblyTitle("AirPods Mic Bridge")]
 [assembly: AssemblyProduct("AirPods Mic Bridge")]
 [assembly: AssemblyDescription("AirPods microphone control for Windows applications")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace AirPodsMicBridge
 {
@@ -118,6 +118,7 @@ namespace AirPodsMicBridge
     {
         internal bool? Muted;
         internal string Message;
+        internal int Generation;
     }
 
     internal sealed class MeterReading
@@ -131,10 +132,11 @@ namespace AirPodsMicBridge
     public sealed class BridgePreferences
     {
         public bool ShowNotificationCard { get; set; }
+        public bool SoundNotifications { get; set; }
         public string Language { get; set; }
         public string Theme { get; set; }
 
-        public BridgePreferences() { Language = "auto"; Theme = "auto"; }
+        public BridgePreferences() { Language = "auto"; Theme = "auto"; SoundNotifications = true; }
     }
 
     internal static class PreferenceStore
@@ -175,9 +177,11 @@ namespace AirPodsMicBridge
         private readonly Thread audioWorker;
         private readonly NotifyIcon tray;
         private readonly UiFeedback feedback;
+        private readonly MicrophoneSounds sounds;
         private readonly BridgePreferences preferences;
         private readonly ToolStripMenuItem enabledItem;
         private readonly ToolStripMenuItem popupItem;
+        private readonly ToolStripMenuItem soundItem;
         private readonly ToolStripMenuItem startupItem;
         private readonly ToolStripMenuItem diagnosticItem;
         private DiagnosticForm diagnosticForm;
@@ -223,6 +227,7 @@ namespace AirPodsMicBridge
             ReplaceTrayIcons();
             feedback = new UiFeedback();
             feedback.ShowNotificationCard = preferences.ShowNotificationCard;
+            sounds = new MicrophoneSounds();
             menu = new ContextMenuStrip();
             stateItem = new ToolStripMenuItem(Localization.Get("waitingMicrophone")) { Enabled = false };
             enabledItem = new ToolStripMenuItem(Localization.Get("controlEnabled")) { Checked = true, CheckOnClick = true };
@@ -246,6 +251,16 @@ namespace AirPodsMicBridge
                 SavePreferences();
             };
             menu.Items.Add(popupItem);
+            soundItem = new ToolStripMenuItem(Localization.Get("soundNotifications"))
+            {
+                Checked = preferences.SoundNotifications, CheckOnClick = true
+            };
+            soundItem.CheckedChanged += delegate
+            {
+                preferences.SoundNotifications = soundItem.Checked;
+                SavePreferences();
+            };
+            menu.Items.Add(soundItem);
             startupItem = new ToolStripMenuItem(Localization.Get("startWithWindows")) { Checked = StartupRegistration.IsEnabled };
             startupItem.Click += delegate
             {
@@ -311,7 +326,12 @@ namespace AirPodsMicBridge
                 FeedbackNotice notice;
                 while (notices.TryDequeue(out notice))
                 {
-                    if (notice.Muted.HasValue) feedback.ShowState(notice.Muted.Value);
+                    if (notice.Muted.HasValue)
+                    {
+                        feedback.ShowState(notice.Muted.Value);
+                        if (preferences.SoundNotifications && enabled && notice.Generation == Volatile.Read(ref generation))
+                            sounds.Play(notice.Muted.Value);
+                    }
                     else feedback.ShowMessage(notice.Message);
                 }
             };
@@ -404,8 +424,10 @@ namespace AirPodsMicBridge
 
         private void AudioLoop()
         {
-            WriteLog("started", new { version = "1.3.0", processId = Process.GetCurrentProcess().Id });
+            WriteLog("started", new { version = "1.4.0", processId = Process.GetCurrentProcess().Id });
             CapturePeakMeter meter = null;
+            var muteNotifications = new MuteNotifications();
+            int observedGeneration = -1;
             string measuredEndpointId = null;
             long lastStateRead = 0;
             long lastMeterOpen = 0;
@@ -417,14 +439,17 @@ namespace AirPodsMicBridge
                     {
                         AudioStateSnapshot state = CoreAudioAdapter.Read();
                         lastStateRead = Stopwatch.GetTimestamp();
-                        CachedAudio previous = cached;
-                        if (enabled && previous != null && previous.State.CanArm && state.CanArm &&
-                            previous.State.EndpointId == state.EndpointId && previous.State.EndpointMuted.HasValue &&
-                            state.EndpointMuted.HasValue && previous.State.EndpointMuted != state.EndpointMuted)
+                        int currentGeneration = Volatile.Read(ref generation);
+                        if (observedGeneration != currentGeneration)
+                        {
+                            muteNotifications.Reset();
+                            observedGeneration = currentGeneration;
+                        }
+                        if (muteNotifications.Observe(state.EndpointId, state.EndpointMuted, enabled && state.CanArm))
                         {
                             // Native headset mute and Fn+F7 can update Core Audio without a Play/Pause key.
                             WriteLog("external-mute", new { endpointId = state.EndpointId, muted = state.EndpointMuted });
-                            notices.Enqueue(new FeedbackNotice { Muted = state.EndpointMuted });
+                            notices.Enqueue(new FeedbackNotice { Muted = state.EndpointMuted, Generation = currentGeneration });
                         }
                         cached = new CachedAudio(state);
                         string fingerprint = serializer.Serialize(new { enabled, state });
@@ -448,13 +473,16 @@ namespace AirPodsMicBridge
                                     if (verified.EndpointMuted != action.ExpectedMuted)
                                     {
                                         WriteLog("native-mute-preserved", new { endpointId = action.EndpointId, muted = verified.EndpointMuted });
-                                        if (verified.EndpointMuted.HasValue) notices.Enqueue(new FeedbackNotice { Muted = verified.EndpointMuted });
+                                        // Share state with the observer across scans to avoid duplicate native cues.
+                                        if (verified.EndpointMuted.HasValue && muteNotifications.Confirm(action.EndpointId, verified.EndpointMuted.Value))
+                                            notices.Enqueue(new FeedbackNotice { Muted = verified.EndpointMuted, Generation = action.Generation });
                                         cached = new CachedAudio(verified);
                                         continue;
                                     }
                                     bool muted = CoreAudioAdapter.Toggle(action.EndpointId);
                                     WriteLog("toggle", new { endpointId = action.EndpointId, before = verified.EndpointMuted, muted, injected = action.Injected });
-                                    notices.Enqueue(new FeedbackNotice { Muted = muted });
+                                    if (muteNotifications.Confirm(action.EndpointId, muted))
+                                        notices.Enqueue(new FeedbackNotice { Muted = muted, Generation = action.Generation });
                                     cached = new CachedAudio(CoreAudioAdapter.Read());
                                 }
                                 else WriteLog("cancelled", new { endpointId = action.EndpointId, reason = verified.Error ?? "MicrophoneUseChanged" });
@@ -463,6 +491,7 @@ namespace AirPodsMicBridge
                             {
                                 WriteLog("error", new { message = ex.Message, hresult = ex.HResult });
                                 notices.Enqueue(new FeedbackNotice { Message = Localization.Get("toggleFailed") });
+                                muteNotifications.Reset();
                                 cached = null;
                             }
                             finally { Interlocked.Exchange(ref pending, 0); }
@@ -588,6 +617,7 @@ namespace AirPodsMicBridge
             startupItem.Text = Localization.Get("startWithWindows");
             diagnosticItem.Text = Localization.Get("diagnosticTitle");
             popupItem.Text = Localization.Get("showCard");
+            soundItem.Text = Localization.Get("soundNotifications");
             languageItem.Text = Localization.Get("language");
             themeItem.Text = Localization.Get("theme");
             exitItem.Text = Localization.Get("exit");
@@ -669,6 +699,7 @@ namespace AirPodsMicBridge
             tray.Dispose();
             menu.Dispose();
             feedback.Dispose();
+            sounds.Dispose();
             readyIcon.Dispose(); mutedIcon.Dispose(); waitingIcon.Dispose();
             foreach (Icon icon in levelIcons) icon.Dispose();
             uiTimer.Dispose();

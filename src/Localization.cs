@@ -41,7 +41,7 @@ namespace AirPodsMicBridge
             "diagnosticStart", "diagnosticStop", "diagnosticSave", "diagnosticClose", "diagnosticReady",
             "diagnosticPress", "diagnosticFinished", "diagnosticEvents", "diagnosticNoMicrophones",
             "diagnosticError", "diagnosticSaved", "diagnosticSaveFailed", "diagnosticReportFilter",
-            "diagnosticRawInputUnavailable"
+            "diagnosticRawInputUnavailable", "soundNotifications"
         };
 
         private static readonly Dictionary<string, Dictionary<string, string>> Catalog =
@@ -196,7 +196,8 @@ namespace AirPodsMicBridge
                     "Начать", "Остановить", "Сохранить отчёт…", "Закрыть", "Выберите микрофон и начните проверку.",
                     "Нажмите кнопку гарнитуры один раз", "Проверка завершена. Сохраните отчёт.", "События", "Нет подключённых микрофонов.",
                     "Ошибка диагностики", "Отчёт сохранён", "Не удалось сохранить отчёт", "Отчёт диагностики (*.jsonl)|*.jsonl",
-                    "События HID недоступны. Медиаклавиши и состояние микрофона продолжают записываться.") },
+                    "События HID недоступны. Медиаклавиши и состояние микрофона продолжают записываться.",
+                    "Звуковые уведомления") },
                 { "en", Entries(
                     "AirPods — microphone",
                     "Microphone muted",
@@ -224,7 +225,8 @@ namespace AirPodsMicBridge
                     "Start", "Stop", "Save report…", "Close", "Select a microphone and start the test.",
                     "Press the headset button once", "Test finished. Save the report.", "Events", "No microphones are connected.",
                     "Diagnostics error", "Report saved", "Could not save the report", "Diagnostic report (*.jsonl)|*.jsonl",
-                    "Raw HID input is unavailable. Media keys and microphone state are still logged.") },
+                    "Raw HID input is unavailable. Media keys and microphone state are still logged.",
+                    "Sound notifications") },
                 { "es", Entries(
                     "AirPods — micrófono",
                     "Micrófono silenciado",
@@ -252,7 +254,8 @@ namespace AirPodsMicBridge
                     "Iniciar", "Detener", "Guardar informe…", "Cerrar", "Seleccione un micrófono e inicie la prueba.",
                     "Pulse el botón del auricular una vez", "Prueba finalizada. Guarde el informe.", "Eventos", "No hay micrófonos conectados.",
                     "Error de diagnóstico", "Informe guardado", "No se pudo guardar el informe", "Informe de diagnóstico (*.jsonl)|*.jsonl",
-                    "La entrada HID no está disponible. Se siguen registrando las teclas multimedia y el estado del micrófono.") },
+                    "La entrada HID no está disponible. Se siguen registrando las teclas multimedia y el estado del micrófono.",
+                    "Notificaciones de sonido") },
                 { "pt-BR", Entries(
                     "AirPods — microfone",
                     "Microfone desativado",
@@ -280,7 +283,8 @@ namespace AirPodsMicBridge
                     "Iniciar", "Parar", "Salvar relatório…", "Fechar", "Selecione um microfone e inicie o teste.",
                     "Pressione o botão do headset uma vez", "Teste concluído. Salve o relatório.", "Eventos", "Nenhum microfone conectado.",
                     "Erro de diagnóstico", "Relatório salvo", "Não foi possível salvar o relatório", "Relatório de diagnóstico (*.jsonl)|*.jsonl",
-                    "A entrada HID não está disponível. As teclas de mídia e o estado do microfone continuam sendo registrados.") },
+                    "A entrada HID não está disponível. As teclas de mídia e o estado do microfone continuam sendo registrados.",
+                    "Notificações sonoras") },
                 { "pt", Entries(
                     "AirPods — microfone",
                     "Microfone desligado",
@@ -308,7 +312,8 @@ namespace AirPodsMicBridge
                     "Iniciar", "Parar", "Guardar relatório…", "Fechar", "Selecione um microfone e inicie o teste.",
                     "Prima o botão dos auscultadores uma vez", "Teste concluído. Guarde o relatório.", "Eventos", "Não há microfones ligados.",
                     "Erro de diagnóstico", "Relatório guardado", "Não foi possível guardar o relatório", "Relatório de diagnóstico (*.jsonl)|*.jsonl",
-                    "A entrada HID não está disponível. As teclas multimédia e o estado do microfone continuam a ser registados.") },
+                    "A entrada HID não está disponível. As teclas multimédia e o estado do microfone continuam a ser registados.",
+                    "Notificações sonoras") },
                 { "id", Entries(
                     "AirPods — mikrofon",
                     "Mikrofon dinonaktifkan",
@@ -336,7 +341,8 @@ namespace AirPodsMicBridge
                     "Mulai", "Hentikan", "Simpan laporan…", "Tutup", "Pilih mikrofon dan mulai pengujian.",
                     "Tekan tombol headset sekali", "Pengujian selesai. Simpan laporan.", "Peristiwa", "Tidak ada mikrofon yang terhubung.",
                     "Kesalahan diagnostik", "Laporan disimpan", "Tidak dapat menyimpan laporan", "Laporan diagnostik (*.jsonl)|*.jsonl",
-                    "Input HID tidak tersedia. Tombol media dan status mikrofon tetap dicatat.") }
+                    "Input HID tidak tersedia. Tombol media dan status mikrofon tetap dicatat.",
+                    "Notifikasi suara") }
             };
         }
     }

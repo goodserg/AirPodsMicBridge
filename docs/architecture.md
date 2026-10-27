@@ -9,6 +9,8 @@
 | `src/ShellShortcut.cs` | Unicode Windows Shell shortcut creation, independent of WScript's target-path setter |
 | `src/CoreAudioAdapter.cs` | Capture discovery, active audio sessions, target selection, mute application and cached peak meter |
 | `src/UiFeedback.cs` | Transparent tray glyphs, fixed corner OSD and optional card |
+| `src/MicrophoneSounds.cs` | Original synthesized mute/unmute PCM chimes and asynchronous Windows playback |
+| `src/MuteNotifications.cs` | Shared mute transition baseline and notification deduplication on the audio worker |
 | `src/Appearance.cs` | App/taskbar theme detection and themed menu renderer |
 | `src/Localization.cs` | Six complete catalogs, Windows UI-language selection and English fallback |
 | `src/DiagnosticForm.cs` | Localized microphone/button-test wizard, consumer/telephony Raw Input registration and report export |
@@ -29,6 +31,8 @@
 - All menu, window and NotifyIcon updates happen on the WinForms UI thread. Build a replacement icon cache completely, assign a new tray icon, then dispose the old cache. Do not rebuild or resize an open menu during microphone-level updates.
 - App theme follows `AppsUseLightTheme`; taskbar contrast follows `SystemUsesLightTheme`. Manual app theme must not make the icon unreadable on the real taskbar.
 - Presentation changes must not show a disabled card or restart the green hide timer. Unknown device state hides the OSD; known mute persists.
+- Sound notifications default to enabled when the preference is absent. A confirmed successful toggle or an observed mute transition during eligible active AirPods capture can produce one sound. Establishing the initial state, changing or reconnecting an endpoint, failed commands, control suspension, diagnostics and presentation changes must not play sounds. Repeated polling of an unchanged state must not repeat a chime.
+- Sound playback must be asynchronous, independent of microphone mute changes and optional. Use original synthesized PCM, the Windows default playback device and existing output volume; do not open a capture stream, change volume or download Apple sound recordings. Audio-device failure must not stop the bridge or replace a missing sound with a system error beep.
 - The OSD stays 48×48 physical pixels at the primary screen origin. Keep system DPI awareness and click-through, nonactivating behaviour.
 - Localized tooltip text must fit NotifyIcon's legacy 63-character limit. Unsupported Windows UI languages fall back to English.
 - Production data lives under the per-user app-data directory. Development checks override the entire directory, including preferences and logs.
@@ -40,6 +44,12 @@
 ## Polling
 
 Audio discovery ordinarily runs every 350 ms; level sampling and UI updates run every 100 ms. Theme registry values are checked once per second. A gesture expires after 1,200 ms and is verified against its original endpoint and control generation before any mute change.
+
+## Sound feedback
+
+The saved **Sound notifications** tray preference is independent of the notification card. Existing settings without a sound field enable the feature on upgrade. Descending notes signal muted and ascending notes signal live. The sounds are original synthesized PCM inspired by short iPhone/AirPods chimes, generated in memory and played asynchronously through `PlaySoundW` with no external sound files or audio downloads. Playback uses the Windows default output; output routing and volume remain under Windows control.
+
+Successful bridge toggles and observed external mute transitions share notification state so that a later polling result cannot replay the same transition. Initial endpoint observation is a silent baseline; unknown or changed endpoint state invalidates that baseline. Only eligible active capture permits an observed external transition to sound. Diagnostics and paused control remain silent. Pure checks validate PCM structure, signal limits and transition behaviour without playing audio or muting a device.
 
 ## Capture selection and hardware delivery
 

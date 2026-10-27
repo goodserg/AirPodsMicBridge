@@ -7,7 +7,7 @@ Build the application first, then pass the path to an Inno Setup 6 compiler:
 ```
 
 The verified compiler is Inno Setup 6.7.3. The build rejects compiler warnings,
-including missing translations. It produces `dist/AirPodsMicBridge-1.3.0-Setup.exe`.
+including missing translations. It produces `dist/AirPodsMicBridge-1.4.0-Setup.exe`.
 The Indonesian translation is vendored; its source and changes are recorded in
 [`languages/README.md`](languages/README.md).
 

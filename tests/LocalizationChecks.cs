@@ -18,7 +18,7 @@ internal static class LocalizationChecks
         "diagnosticStart", "diagnosticStop", "diagnosticSave", "diagnosticClose", "diagnosticReady",
         "diagnosticPress", "diagnosticFinished", "diagnosticEvents", "diagnosticNoMicrophones",
         "diagnosticError", "diagnosticSaved", "diagnosticSaveFailed", "diagnosticReportFilter",
-        "diagnosticRawInputUnavailable"
+        "diagnosticRawInputUnavailable", "soundNotifications"
     };
 
     private static int Main()

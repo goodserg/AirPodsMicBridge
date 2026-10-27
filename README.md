@@ -6,7 +6,7 @@ Windows tray utility that turns the AirPods play/pause gesture into a system mic
 
 ## Use
 
-1. On Windows 11 x64, download and run `AirPodsMicBridge-1.3.0-Setup.exe` from the release. First choose **Current user** (default, no administrator privileges) or **All users** (requires administrator privileges), then choose the installation folder. The final **Launch AirPods Mic Bridge** and **Start with Windows** checkboxes are checked by default. .NET Framework 4.x is required.
+1. On Windows 11 x64, download and run `AirPodsMicBridge-1.4.0-Setup.exe` from the release. First choose **Current user** (default, no administrator privileges) or **All users** (requires administrator privileges), then choose the installation folder. The final **Launch AirPods Mic Bridge** and **Start with Windows** checkboxes are checked by default. .NET Framework 4.x is required.
 2. Connect AirPods, select their microphone in your voice application or browser site, and start microphone use.
 3. Press the AirPods stem once to mute; press again to unmute. The gesture must arrive in Windows as a play/pause command.
 
@@ -16,9 +16,14 @@ The tray microphone has a transparent background. Its capsule fills with the cur
 
 A red **48×48 physical pixel** indicator stays at the top-left corner of the primary screen while the observed AirPods microphone is muted. After unmuting, a green indicator appears for 2.2 seconds. Indicators pass clicks through and do not take focus.
 
+Short, soft chimes confirm microphone changes: descending for mute and ascending for unmute. **Sound notifications** are **on by default**, including when upgrading older settings, and can be disabled in the tray menu. The choice is saved. These are original synthesized sounds inspired by iPhone/AirPods feedback, with no Apple recordings included.
+
+Sounds follow confirmed bridge toggles and observed external mute changes while one unambiguous AirPods microphone has active capture. Initial state detection, startup, reconnection, failed commands and diagnostics stay silent. Playback uses the default Windows playback device and its current volume; select AirPods as that device if you want the chime in the headset. The utility does not change playback volume or the application's own mute button.
+
 Right-click the tray icon to choose:
 
 - Microphone control on/off.
+- Sound notifications, **on by default**.
 - Start with Windows on/off.
 - Optional notification card, **off by default**.
 - Theme: **Automatic (Windows)**, Light, Dark.
@@ -89,7 +94,7 @@ This records what Windows exposes to applications. It does not sniff Bluetooth p
 .\package.ps1
 ```
 
-The application build uses the Windows .NET Framework C# compiler (C# 5, x64), without external packages or network downloads. Building the installer additionally requires Inno Setup 6.7.3; its Indonesian language file is included with source attribution. Default output is `dist\AirPodsMicBridge`. Temporary build files use the operating system's temporary directory; `-BuildRoot` overrides it. Tests run without microphone changes or recording, and startup checks use isolated per-user and common Startup directories. Build the installer before packaging; packaging creates the ZIP and SHA-256 manifests under `dist` and includes the setup executable in the release checksums.
+The application build uses the Windows .NET Framework C# compiler (C# 5, x64), without external packages or network downloads. Building the installer additionally requires Inno Setup 6.7.3; its Indonesian language file is included with source attribution. Default output is `dist\AirPodsMicBridge`. Temporary build files use the operating system's temporary directory; `-BuildRoot` overrides it. Tests run without microphone changes, audio playback or recording, and startup checks use isolated per-user and common Startup directories. Sound checks examine generated PCM and notification transitions without opening an audio device. Build the installer before packaging; packaging creates the ZIP and SHA-256 manifests under `dist` and includes the setup executable in the release checksums.
 
 `test-installer.ps1 -CompilerPath <ISCC.exe>` builds an isolated fixture and checks installation, upgrades and uninstallation in all six languages. It creates temporary program/shortcut/data directories and a separate per-user uninstall entry, then removes the fixture installation. Common-startup behaviour uses a separate test directory. These checks do not install the production all-users package or change the real Startup folders and running application.
 

@@ -172,7 +172,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Copy-Item -LiteralPath $builtFile -Destination (Join-Path $OutputDirectory 'AirPodsMicBridge.exe') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md'),(Join-Path $PSScriptRoot 'README.ru.md'),(Join-Path $PSScriptRoot 'CHANGELOG.md') -Destination $OutputDirectory -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\releases\v1.3.0.md') -Destination (Join-Path $OutputDirectory 'RELEASE_NOTES.md') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\releases\v1.4.0.md') -Destination (Join-Path $OutputDirectory 'RELEASE_NOTES.md') -Force
 $outputAssets = Join-Path $OutputDirectory 'assets'
 New-Item -ItemType Directory -Path $outputAssets -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $assetRoot 'theme-preview.png') -Destination $outputAssets -Force

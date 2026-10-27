@@ -117,16 +117,43 @@ internal static class StartupChecks
 
     private static void CheckShortcut(string path, string executable, string workingDirectory, string label)
     {
-        object shell = null, shortcut = null;
+        // This is an independent native reader, not the product writer. WScript's
+        // legacy reader did not preserve Cyrillic on the English Windows CI image.
+        object instance = null;
+        string stage = "Load";
         try
         {
-            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
-            shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
-            Assert(String.Equals(Get(shortcut, "TargetPath"), executable, StringComparison.OrdinalIgnoreCase), label + ": target path lost spaces or Unicode.");
-            Assert(Get(shortcut, "Arguments") == "--autostart", label + ": startup must respect the current user's opt-out.");
-            Assert(String.Equals(Get(shortcut, "WorkingDirectory"), workingDirectory, StringComparison.OrdinalIgnoreCase), label + ": working directory does not match executable.");
+            instance = new ShortcutReadComObject();
+            ((System.Runtime.InteropServices.ComTypes.IPersistFile)instance).Load(path, 0);
+            var link = (IShortcutReadW)instance;
+            var target = new System.Text.StringBuilder(32768);
+            var arguments = new System.Text.StringBuilder(32768);
+            var directory = new System.Text.StringBuilder(32768);
+            stage = "GetPath";
+            CheckResult(link.GetPath(target, target.Capacity, IntPtr.Zero, 4)); // SLGP_RAWPATH
+            stage = "GetArguments";
+            CheckResult(link.GetArguments(arguments, arguments.Capacity));
+            stage = "GetWorkingDirectory";
+            CheckResult(link.GetWorkingDirectory(directory, directory.Capacity));
+            Assert(String.Equals(target.ToString(), executable, StringComparison.Ordinal), label +
+                ": Unicode target mismatch; expected=" + executable + "; actual=" + target);
+            Assert(arguments.ToString() == "--autostart", label + ": startup must respect the current user's opt-out; actual=" + arguments);
+            Assert(String.Equals(directory.ToString(), workingDirectory, StringComparison.Ordinal), label +
+                ": Unicode working directory mismatch; expected=" + workingDirectory + "; actual=" + directory);
         }
-        finally { Release(shortcut); Release(shell); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(label + ": native shortcut reader failed at " + stage +
+                "; shortcut=" + path + "; shortcutLength=" + path.Length +
+                "; targetLength=" + executable.Length + "; workingDirectoryLength=" + workingDirectory.Length, ex);
+        }
+        finally { Release(instance); }
+        // Also inspect the serialized link independently of COM getters.
+        byte[] bytes = File.ReadAllBytes(path);
+        Assert(ContainsBytes(bytes, System.Text.Encoding.Unicode.GetBytes(workingDirectory)),
+            label + ": serialized link lacks the exact UTF-16 working directory.");
+        Assert(ContainsBytes(bytes, System.Text.Encoding.Unicode.GetBytes(Path.GetFileName(executable))),
+            label + ": serialized link lacks the exact UTF-16 target file name.");
     }
 
     private static void CheckCommonRegistration(string isolated)
@@ -204,9 +231,44 @@ internal static class StartupChecks
         finally { Release(shortcut); Release(shell); }
     }
 
-    private static string Get(object value, string name)
+    private static void CheckResult(int result) { if (result < 0) Marshal.ThrowExceptionForHR(result); }
+
+    private static bool ContainsBytes(byte[] bytes, byte[] pattern)
     {
-        return Convert.ToString(value.GetType().InvokeMember(name, BindingFlags.GetProperty, null, value, null));
+        for (int offset = 0; offset <= bytes.Length - pattern.Length; offset++)
+        {
+            int index = 0;
+            while (index < pattern.Length && bytes[offset + index] == pattern[index]) index++;
+            if (index == pattern.Length) return true;
+        }
+        return false;
+    }
+
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046"), ClassInterface(ClassInterfaceType.None)]
+    private sealed class ShortcutReadComObject { }
+
+    // Full native vtable, declared independently of src/ShellShortcut.cs.
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShortcutReadW
+    {
+        [PreserveSig] int GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder file, int capacity, IntPtr findData, uint flags);
+        [PreserveSig] int GetIDList(out IntPtr itemList);
+        [PreserveSig] int SetIDList(IntPtr itemList);
+        [PreserveSig] int GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder description, int capacity);
+        [PreserveSig] int SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+        [PreserveSig] int GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder directory, int capacity);
+        [PreserveSig] int SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+        [PreserveSig] int GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder arguments, int capacity);
+        [PreserveSig] int SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        [PreserveSig] int GetHotkey(out ushort hotkey);
+        [PreserveSig] int SetHotkey(ushort hotkey);
+        [PreserveSig] int GetShowCmd(out int command);
+        [PreserveSig] int SetShowCmd(int command);
+        [PreserveSig] int GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder iconPath, int capacity, out int iconIndex);
+        [PreserveSig] int SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
+        [PreserveSig] int SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relativePath, uint reserved);
+        [PreserveSig] int Resolve(IntPtr window, uint flags);
+        [PreserveSig] int SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
     }
 
     private static void Release(object value)

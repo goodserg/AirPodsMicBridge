@@ -1,4 +1,4 @@
-param([string]$Version = '1.3.0', [string]$OutputRoot = '')
+param([string]$Version = '1.4.0', [string]$OutputRoot = '')
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $PSScriptRoot 'dist' }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 — 2026-10-27
+
+- Original, short and soft iPhone/AirPods-inspired microphone notifications: descending notes confirm mute and ascending notes confirm unmute. No Apple recordings are bundled.
+- **Sound notifications** is enabled by default, including with older settings, and can be disabled from the tray menu in all six languages. The choice is saved independently of the optional notification card.
+- Sounds follow confirmed bridge toggles and observed external mute changes during eligible active AirPods capture. Startup, initial discovery, reconnection, failed commands, paused control and diagnostics remain silent; unchanged polling does not repeat a notification.
+- Asynchronous in-memory PCM playback uses the Windows default output and its existing volume. Audio playback failure does not interfere with microphone control.
+- Added checks for generated audio and transition behaviour without playback, recording or microphone changes.
+
 ## 1.3.0 — 2026-10-11
 
 - Application-independent microphone control: any active Windows capture session on an unambiguous AirPods device can arm the play/pause gesture, including browser and system sessions.
